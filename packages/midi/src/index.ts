@@ -1,9 +1,44 @@
-export interface MidiExportResult {
-  format: 'SMF1';
-  bytes: Uint8Array;
-}
+export type Duration = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
+export interface NoteLike { id: string; type: 'note'; duration: Duration; dots: 0 | 1 | 2; pitch: { step: 'A'|'B'|'C'|'D'|'E'|'F'|'G'; octave: number; accidental?: -2|-1|0|1|2 }; tieStartId?: string; tieEndId?: string; dynamics?: 'pp'|'p'|'mp'|'mf'|'f'|'ff'; }
+export interface RestLike { id: string; type: 'rest'; duration: Duration; dots: 0 | 1 | 2; }
+export type VoiceEvent = NoteLike | RestLike;
+export interface VoiceLike { id: string; events: VoiceEvent[] }
+export interface MeasureLike { id: string; number: number; voices: VoiceLike[]; timeSignature?: { numerator:number; denominator:2|4|8|16 }; keySignature?: { fifths:number; mode:'major'|'minor' }; tempoBpm?: number; }
+export interface StaffLike { id: string; measures: MeasureLike[] }
+export interface PartLike { id: string; name: string; staves: StaffLike[] }
+export interface ScoreLike { id: string; title: string; parts: PartLike[] }
+export interface PlaybackEventLike { sourceEventId:string; tick:number; durationTicks:number; midi:number; velocity:number }
 
-export const exportMidiPlaceholder = (): MidiExportResult => ({
-  format: 'SMF1',
-  bytes: new Uint8Array([0x4d, 0x54, 0x68, 0x64]),
-});
+export interface MidiTrackEvent { tick:number; type:'meta'|'channel'; sortOrder:number; data:Uint8Array }
+export interface PartChannelMapping { channel:number; program:number }
+export interface MidiExportOptions { ticksPerQuarter?:number; partChannelMapping?:Record<string, PartChannelMapping>; usePlaybackEvents?:PlaybackEventLike[]; humanize?: false | { seed:number; maxTickOffset:number; velocityJitter:number } }
+export interface MidiExportResult { format:'SMF1'; bytes:Uint8Array; trackCount:number; ticksPerQuarter:number }
+export interface ParsedMidiTrackEvent { delta:number; absoluteTick:number; kind:'meta'|'sysex'|'channel'; status?:number; metaType?:number; data:Uint8Array }
+export interface ParsedMidiFile { format:number; trackCount:number; division:number; tracks:ParsedMidiTrackEvent[][] }
+export interface MidiImportScaffold { parsed: ParsedMidiFile; warnings:string[] }
+
+const TPQ=480;
+const dTicks=(d:Duration,dots:0|1|2,tpq:number)=>{const b:{[K in Duration]:number}={whole:tpq*4,half:tpq*2,quarter:tpq,eighth:Math.floor(tpq/2),sixteenth:Math.floor(tpq/4)};const base=b[d];return dots===0?base:dots===1?base+Math.floor(base/2):base+Math.floor(base/2)+Math.floor(base/4)};
+const pitch=(n:NoteLike)=> (n.pitch.octave+1)*12+({C:0,D:2,E:4,F:5,G:7,A:9,B:11}[n.pitch.step]??0)+(n.pitch.accidental??0);
+const vlen=(value:number)=>{let b=value&0x7f;const out:number[]=[];while((value>>=7)>0){b<<=8;b|=(value&0x7f)|0x80;}while(true){out.push(b&0xff);if(b&0x80)b>>=8;else break;}return new Uint8Array(out)};
+const writeTrack=(events:MidiTrackEvent[])=>{const sorted=[...events].sort((a,b)=>a.tick-b.tick||a.sortOrder-b.sortOrder);let prev=0;const out:number[]=[];for(const e of sorted){out.push(...vlen(e.tick-prev),...e.data);prev=e.tick;}out.push(0,0xff,0x2f,0);const body=new Uint8Array(out);const chunk=new Uint8Array(8+body.length);chunk.set([0x4d,0x54,0x72,0x6b],0);const len=body.length;chunk.set([(len>>24)&255,(len>>16)&255,(len>>8)&255,len&255],4);chunk.set(body,8);return chunk};
+const keySig=(f:number,m:'major'|'minor')=>{const n=Math.max(-7,Math.min(7,f));return new Uint8Array([0xff,0x59,0x02,n<0?256+n:n,m==='minor'?1:0])};
+const timeSig=(n:number,d:2|4|8|16)=> new Uint8Array([0xff,0x58,0x04,n,Math.log2(d),24,8]);
+const tempo=(bpm:number)=>{const mpqn=Math.max(1,Math.round(60_000_000/bpm));return new Uint8Array([0xff,0x51,0x03,(mpqn>>16)&255,(mpqn>>8)&255,mpqn&255])};
+const name=(s:string)=>{const e=new TextEncoder().encode(s);return new Uint8Array([0xff,0x03,e.length,...e])};
+const rand=(seed:number)=>{let s=seed>>>0;return()=>((s=(1664525*s+1013904223)>>>0)/0x100000000)};
+
+const measureStarts=(score:ScoreLike,tpq:number)=>{const m=score.parts[0]?.staves[0]?.measures??[];let t=0;const out:number[]=[];for(const ms of m){out.push(t);const explicit=Math.max(...ms.voices.map(v=>v.events.reduce((a,e)=>a+dTicks(e.duration,e.dots,tpq),0)),0);if(explicit>0){t+=explicit;continue;}if(ms.timeSignature){t+=Math.floor((ms.timeSignature.numerator*tpq*4)/ms.timeSignature.denominator);continue;}t+=tpq*4;}return out};
+
+const gatherFromScore=(part:PartLike,starts:number[],tpq:number)=>{const notes:{tick:number;durationTicks:number;midi:number;velocity:number}[]=[];for(const staff of part.staves){for(let i=0;i<staff.measures.length;i++){const m=staff.measures[i];if(!m) continue;for(const voice of m.voices){const loc=new Map<string,number>();let t=0;for(const e of voice.events){loc.set(e.id,t);t+=dTicks(e.duration,e.dots,tpq);}const used=new Set<string>();for(const e of voice.events){if(e.type!=='note'||used.has(e.id)||e.tieEndId) continue;let dur=dTicks(e.duration,e.dots,tpq);let cur:NoteLike=e;used.add(cur.id);while(cur.tieStartId){const nx=voice.events.find(c=>c.id===cur.tieStartId);if(!nx||nx.type!=='note'||pitch(nx)!==pitch(e)) break;dur+=dTicks(nx.duration,nx.dots,tpq);used.add(nx.id);cur=nx;}notes.push({tick:(starts[i]??0)+(loc.get(e.id)??0),durationTicks:dur,midi:pitch(e),velocity:e.dynamics==='ff'?120:90});}}}}return notes};
+const gatherFromPlayback=(part:PartLike,events:PlaybackEventLike[],opts:MidiExportOptions)=>{const ids=new Set<string>();for(const st of part.staves)for(const m of st.measures)for(const v of m.voices)for(const e of v.events)ids.add(e.id);const human=opts.humanize||undefined;const r=human?rand(human.seed):undefined;return events.filter(e=>ids.has(e.sourceEventId)).map(e=>{const to=r?Math.round((r()*2-1)*human!.maxTickOffset):0;const vj=r?Math.round((r()*2-1)*human!.velocityJitter):0;return{tick:Math.max(0,e.tick+to),durationTicks:e.durationTicks,midi:e.midi,velocity:Math.max(1,Math.min(127,e.velocity+vj))}})};
+
+export const exportMidi=(score:ScoreLike, options:MidiExportOptions={}):MidiExportResult=>{const tpq=options.ticksPerQuarter??TPQ;const starts=measureStarts(score,tpq);const map:Record<string,PartChannelMapping>={};let ch=0;for(const p of score.parts){if(options.partChannelMapping?.[p.id]) map[p.id]=options.partChannelMapping[p.id]!; else {while(ch===9) ch++; map[p.id]={channel:ch%16,program:0}; ch++;}}
+const conductor:MidiTrackEvent[]=[{tick:0,type:'meta',sortOrder:-1,data:name(score.title||'Score')}];const baseMeasures=score.parts[0]?.staves[0]?.measures??[];for(let i=0;i<baseMeasures.length;i++){const m=baseMeasures[i];if(!m)continue;const t=starts[i]??0;if(m.tempoBpm) conductor.push({tick:t,type:'meta',sortOrder:0,data:tempo(m.tempoBpm)});if(m.timeSignature) conductor.push({tick:t,type:'meta',sortOrder:1,data:timeSig(m.timeSignature.numerator,m.timeSignature.denominator)});if(m.keySignature) conductor.push({tick:t,type:'meta',sortOrder:2,data:keySig(m.keySignature.fifths,m.keySignature.mode)});}const tracks=[writeTrack(conductor)];
+for(const p of score.parts){const cfg=map[p.id]??{channel:0,program:0};const notes=options.usePlaybackEvents?gatherFromPlayback(p,options.usePlaybackEvents,options):gatherFromScore(p,starts,tpq);const ev:MidiTrackEvent[]=[{tick:0,type:'meta',sortOrder:-2,data:name(p.name)},{tick:0,type:'channel',sortOrder:-1,data:new Uint8Array([0xc0|cfg.channel,cfg.program&0x7f])}];for(const n of notes){ev.push({tick:n.tick,type:'channel',sortOrder:2,data:new Uint8Array([0x90|cfg.channel,n.midi&0x7f,n.velocity&0x7f])});ev.push({tick:n.tick+n.durationTicks,type:'channel',sortOrder:1,data:new Uint8Array([0x80|cfg.channel,n.midi&0x7f,0])});}tracks.push(writeTrack(ev));}
+const header=new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,tracks.length,(tpq>>8)&255,tpq&255]);const bytes=new Uint8Array(header.length+tracks.reduce((a,t)=>a+t.length,0));bytes.set(header,0);let off=header.length;for(const t of tracks){bytes.set(t,off);off+=t.length;}return{format:'SMF1',bytes,trackCount:tracks.length,ticksPerQuarter:tpq}}
+
+const readV=(bytes:Uint8Array,offset:number)=>{let r=0,c=offset;while(true){const b=bytes[c];if(b===undefined) throw new Error('Unexpected EOF while reading variable-length value.');c++;r=(r<<7)|(b&0x7f);if((b&0x80)===0)break;}return{value:r,nextOffset:c}};
+export const parseMidi=(bytes:Uint8Array):ParsedMidiFile=>{const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);if(v.getUint32(0)!==0x4d546864) throw new Error('Invalid MIDI header chunk.');if(v.getUint32(4)!==6) throw new Error('Unsupported MIDI header length.');const format=v.getUint16(8),trackCount=v.getUint16(10),division=v.getUint16(12);let off=14;const tracks:ParsedMidiTrackEvent[][]=[];for(let i=0;i<trackCount;i++){if(v.getUint32(off)!==0x4d54726b) throw new Error('Invalid MIDI track chunk.');const len=v.getUint32(off+4);const end=off+8+len;off+=8;let tick=0,run=0;const events:ParsedMidiTrackEvent[]=[];while(off<end){const d=readV(bytes,off);off=d.nextOffset;tick+=d.value;let status=bytes[off];if(status===undefined) throw new Error('Unexpected EOF while reading MIDI status byte.');if(status<0x80) status=run; else {off++;run=status;}if(status===0xff){const mt=bytes[off];if(mt===undefined) throw new Error('Unexpected EOF while reading meta event type.');off++;const l=readV(bytes,off);off=l.nextOffset;const data=bytes.slice(off,off+l.value);off+=l.value;events.push({delta:d.value,absoluteTick:tick,kind:'meta',metaType:mt,data});continue;}if(status===0xf0||status===0xf7){const l=readV(bytes,off);off=l.nextOffset;const data=bytes.slice(off,off+l.value);off+=l.value;events.push({delta:d.value,absoluteTick:tick,kind:'sysex',status,data});continue;}const cmd=status&0xf0;const count=cmd===0xc0||cmd===0xd0?1:2;const data=bytes.slice(off,off+count);off+=count;events.push({delta:d.value,absoluteTick:tick,kind:'channel',status,data});}tracks.push(events);}return{format,trackCount,division,tracks}};
+
+export const importMidiScaffold=(bytes:Uint8Array):MidiImportScaffold=>{const parsed=parseMidi(bytes);const warnings:string[]=[];if(parsed.format!==1) warnings.push('Only format 1 is fully supported.');if(parsed.division&0x8000) warnings.push('SMPTE time division detected; PPQ expected.');return{parsed,warnings}};
