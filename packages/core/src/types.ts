@@ -1,6 +1,6 @@
 export type Id = string;
 
-export type Duration = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
+export type Duration = 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtySecond' | 'sixtyFourth';
 
 export interface Pitch {
   step: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G';

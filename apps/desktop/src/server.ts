@@ -1,7 +1,9 @@
+import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { addMeasure, advancePlayback, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
+import { deserializeScore } from '@scorecraft/core';
+import { addMeasure, advancePlayback, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, exportMidiWithNotifications, saveProject, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
 
@@ -44,7 +46,7 @@ const sendJson = (response: ServerResponse<IncomingMessage>, statusCode: number,
 const isDynamics = (value: unknown): value is 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' =>
   value === 'pp' || value === 'p' || value === 'mp' || value === 'mf' || value === 'f' || value === 'ff';
 
-const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' => {
+const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtySecond' | 'sixtyFourth' => {
   switch (duration) {
     case 'whole':
     case 'half':
@@ -53,6 +55,10 @@ const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16t
       return duration;
     case '16th':
       return 'sixteenth';
+    case '32nd':
+      return 'thirtySecond';
+    case '64th':
+      return 'sixtyFourth';
     default:
       return 'quarter';
   }
@@ -63,6 +69,17 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
 
   const server = createServer(async (request, response) => {
     shellState = advancePlayback(shellState);
+
+
+    if (request.method === 'GET' && request.url === '/api/state') {
+      sendJson(response, 200, {
+        mode: shellState.mode,
+        project: shellState.project,
+        measureCount: shellState.score.parts[0]?.staves[0]?.measures.length ?? 0,
+        eventCount: shellState.score.parts[0]?.staves[0]?.measures[0]?.voices[0]?.events.length ?? 0,
+      });
+      return;
+    }
 
     if (request.method === 'POST' && request.url === '/api/transport') {
       try {
@@ -144,6 +161,73 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
       return;
     }
 
+
+
+    if (request.method === 'POST' && request.url === '/api/project/save') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { path?: string };
+        if (!payload.path || payload.path.trim() === '') {
+          sendJson(response, 400, { error: 'Missing save path.' });
+          return;
+        }
+
+        shellState = await saveProject(shellState, payload.path, writeFile);
+        sendJson(response, 200, { ok: true, path: shellState.project.path, dirty: shellState.project.dirty });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to save project.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/project/load') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { path?: string };
+        if (!payload.path || payload.path.trim() === '') {
+          sendJson(response, 400, { error: 'Missing load path.' });
+          return;
+        }
+
+        const raw = await readFile(payload.path, 'utf8');
+        const loadedScore = deserializeScore(raw);
+        const nextShell = createDesktopShell({ title: loadedScore.title });
+        nextShell.score = loadedScore;
+        nextShell.project.path = payload.path;
+        nextShell.project.dirty = false;
+        shellState = nextShell;
+
+        sendJson(response, 200, { ok: true, title: shellState.score.title });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load project.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/midi/export') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { path?: string };
+        if (!payload.path || payload.path.trim() === '') {
+          sendJson(response, 400, { error: 'Missing export path.' });
+          return;
+        }
+
+        shellState = await exportMidiWithNotifications(shellState, payload.path, writeFile);
+        const last = shellState.notifications.at(-1);
+        if (last?.level === 'error') {
+          sendJson(response, 400, { error: last.message });
+          return;
+        }
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to export MIDI.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
 
     if (request.method === 'POST' && request.url === '/api/engraving') {
       try {

@@ -105,6 +105,25 @@ export const applyCommand = (score: Score, command: Command): EditingResult => {
       const src = getEvent(voice, command.selection.eventId);
       const dst = getEvent(voice, command.targetEventId);
       if (src.type !== 'note' || dst.type !== 'note') throw new Error('Ties require note events.');
+      if (src.id === dst.id) throw new Error('Cannot tie a note to itself.');
+      if (toMidi(src.pitch) !== toMidi(dst.pitch)) throw new Error('Ties require equivalent pitch.');
+
+      for (const event of voice.events) {
+        if (event.type !== 'note') continue;
+        if (event.tieStartId === src.id || event.tieEndId === src.id || event.tieStartId === dst.id || event.tieEndId === dst.id) {
+          if (event.id !== src.id && event.id !== dst.id) {
+            delete event.tieStartId;
+            delete event.tieEndId;
+          }
+        }
+      }
+
+      if (dst.tieStartId === src.id || src.tieEndId === dst.id) {
+        throw new Error('Tie would create a cycle.');
+      }
+
+      delete src.tieEndId;
+      delete dst.tieStartId;
       src.tieStartId = dst.id;
       dst.tieEndId = src.id;
       changedObjectIds.push(src.id, dst.id);

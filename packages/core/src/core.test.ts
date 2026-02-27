@@ -27,6 +27,12 @@ describe('model + validation', () => {
     expect(validateScore(score)).toEqual([]);
   });
 
+  it('supports thirty-second and sixty-fourth durations in tick conversion', () => {
+    expect(durationToTicks('thirtySecond', 0)).toBe(60);
+    expect(durationToTicks('sixtyFourth', 0)).toBe(30);
+    expect(durationToTicks('thirtySecond', 2)).toBe(105);
+  });
+
   it('flags structural issues and bad tempo', () => {
     const score = createScore();
     score.parts = [];
@@ -115,6 +121,28 @@ describe('command semantics', () => {
     ).toThrow();
 
     expect(() => applyCommand(score, { type: 'setTempo', selection: sel, bpm: 500 })).toThrow('Validation failed');
+  });
+
+  it('prevents invalid tie editing patterns', () => {
+    const { score, sel } = setup();
+    let current = applyCommand(score, { type: 'insertNote', selection: sel, pitch: { step: 'C', octave: 4 }, duration: 'quarter' }).score;
+    current = applyCommand(current, { type: 'insertNote', selection: sel, pitch: { step: 'D', octave: 4 }, duration: 'quarter' }).score;
+    current = applyCommand(current, { type: 'insertNote', selection: sel, pitch: { step: 'C', octave: 4 }, duration: 'quarter' }).score;
+
+    const [c1, d1, c2] = current.parts[0].staves[0].measures[0].voices[0].events.map((event) => event.id);
+
+    expect(() =>
+      applyCommand(current, { type: 'addTie', selection: { ...sel, eventId: c1 }, targetEventId: d1 }),
+    ).toThrow('equivalent pitch');
+
+    const tied = applyCommand(current, { type: 'addTie', selection: { ...sel, eventId: c1 }, targetEventId: c2 }).score;
+    const tiedEvents = tied.parts[0].staves[0].measures[0].voices[0].events;
+    expect(tiedEvents[0]).toMatchObject({ tieStartId: c2 });
+    expect(tiedEvents[2]).toMatchObject({ tieEndId: c1 });
+
+    expect(() =>
+      applyCommand(tied, { type: 'addTie', selection: { ...sel, eventId: c2 }, targetEventId: c1 }),
+    ).toThrow('cycle');
   });
 
   it('persists spelling override behavior during transpose', () => {

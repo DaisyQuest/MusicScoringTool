@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createDesktopServer,
@@ -105,6 +108,11 @@ describe('desktop server', () => {
       body: JSON.stringify({ pitch: { step: 'D', octave: 4 }, duration: '64th', dots: 0 }),
     });
     expect(fallbackDurationResponse.status).toBe(200);
+
+    const stateResponse = await fetch(`${baseUrl}/api/state`);
+    expect(stateResponse.status).toBe(200);
+    const statePayload = (await stateResponse.json()) as { eventCount: number };
+    expect(statePayload.eventCount).toBe(1);
 
     const html = await (await fetch(baseUrl)).text();
     expect(html).toContain('Events in focus voice');
@@ -227,6 +235,68 @@ describe('desktop server', () => {
     expect(html).toContain('152 bpm');
   });
 
+
+  it('supports save/load and midi export endpoints', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const workspace = await mkdtemp(join(tmpdir(), 'scorecraft-server-test-'));
+
+    try {
+      const projectPath = join(workspace, 'session.scorecraft.json');
+      const midiPath = join(workspace, 'session.mid');
+
+      await fetch(`${baseUrl}/api/hotkey`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ hotkey: 'n' }),
+      });
+      await fetch(`${baseUrl}/api/notes`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: '32nd', dots: 0 }),
+      });
+
+      const saveResponse = await fetch(`${baseUrl}/api/project/save`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: projectPath }),
+      });
+      expect(saveResponse.status).toBe(200);
+
+      const savedRaw = await readFile(projectPath, 'utf8');
+      expect(savedRaw).toContain('schemaVersion');
+
+      const exportResponse = await fetch(`${baseUrl}/api/midi/export`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: midiPath }),
+      });
+      expect(exportResponse.status).toBe(200);
+      const midiStats = await stat(midiPath);
+      expect(midiStats.size).toBeGreaterThan(0);
+
+      const loadResponse = await fetch(`${baseUrl}/api/project/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: projectPath }),
+      });
+      expect(loadResponse.status).toBe(200);
+
+      const state = await (await fetch(`${baseUrl}/api/state`)).json() as { project: { path?: string }; eventCount: number };
+      expect(state.project.path).toBe(projectPath);
+      expect(state.eventCount).toBe(1);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('rejects malformed API payloads', async () => {
     const desktopServer = await startDesktopServer(0);
     startedServers.push(desktopServer);
@@ -273,6 +343,27 @@ describe('desktop server', () => {
       body: JSON.stringify({ tempoBpm: 120, dynamics: 'sfffz' }),
     });
     expect(invalidEngravingDynamics.status).toBe(400);
+
+    const missingSavePath = await fetch(`${baseUrl}/api/project/save`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingSavePath.status).toBe(400);
+
+    const missingLoadPath = await fetch(`${baseUrl}/api/project/load`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingLoadPath.status).toBe(400);
+
+    const missingExportPath = await fetch(`${baseUrl}/api/midi/export`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingExportPath.status).toBe(400);
 
     const invalidNote = await fetch(`${baseUrl}/api/notes`, {
       method: 'POST',

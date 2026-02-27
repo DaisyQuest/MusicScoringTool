@@ -176,16 +176,35 @@ export const generatePlaybackEvents = (
   const expressive = options.expressive ?? false;
   const events: PlaybackEvent[] = [];
   const hairpinOffsets = expressive ? buildHairpinVelocityOffsets(score) : new Map<string, number>();
+  const globalTraversal: ResolverResult = { order: [], terminatedBy: 'end_of_score' };
 
   for (const part of score.parts) {
     for (const staff of part.staves) {
       const traversal = resolveMeasureTraversal(staff.measures, options.maxVisits);
-      let tick = 0;
-      for (const visit of traversal.order) {
+      if (globalTraversal.order.length === 0 || traversal.order.length > globalTraversal.order.length) {
+        globalTraversal.order = traversal.order;
+        globalTraversal.terminatedBy = traversal.terminatedBy;
+      }
+
+      for (let visitIndex = 0; visitIndex < traversal.order.length; visitIndex += 1) {
+        const visit = traversal.order[visitIndex];
         const measure = staff.measures.find((m) => m.id === visit.measureId);
         if (!measure) continue;
 
         for (const voice of measure.voices) {
+          let localTick = 0;
+          const measureStartTick = traversal.order
+            .slice(0, visitIndex)
+            .reduce((acc, priorVisit) => {
+              const priorMeasure = staff.measures.find((m) => m.id === priorVisit.measureId);
+              if (!priorMeasure) return acc;
+              const maxVoiceTicks = priorMeasure.voices.reduce((voiceMax, priorVoice) => {
+                const voiceTicks = priorVoice.events.reduce((voiceAcc, event) => voiceAcc + durationToTicks(event.duration, event.dots), 0);
+                return Math.max(voiceMax, voiceTicks);
+              }, 0);
+              return acc + maxVoiceTicks;
+            }, 0);
+
           for (const event of voice.events) {
             const durationTicks = durationToTicks(event.duration, event.dots);
             if (event.type === 'note') {
@@ -194,23 +213,22 @@ export const generatePlaybackEvents = (
               const hairpinBoost = expressive ? hairpinOffsets.get(event.id) ?? 0 : 0;
               events.push({
                 sourceEventId: event.id,
-                tick: tick + articulation.timingOffsetTicks,
+                tick: measureStartTick + localTick + articulation.timingOffsetTicks,
                 durationTicks: Math.max(1, Math.round(durationTicks * articulation.durationScale)),
                 midi: pitchToMidi(event.pitch.step, event.pitch.octave, event.pitch.accidental ?? 0),
                 velocity: clamp(baseVelocity + articulation.velocityDelta + hairpinBoost, 1, 127),
                 articulationContext: [...event.articulations],
               });
             }
-            tick += durationTicks;
+            localTick += durationTicks;
           }
         }
       }
-
-      return { events, traversal };
     }
   }
 
-  return { events, traversal: { order: [], terminatedBy: 'end_of_score' } };
+  events.sort((a, b) => a.tick - b.tick || a.sourceEventId.localeCompare(b.sourceEventId));
+  return { events, traversal: globalTraversal };
 };
 
 export interface Scheduler {
