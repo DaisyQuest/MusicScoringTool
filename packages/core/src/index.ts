@@ -5,3 +5,4 @@ export * from './commands.js';
 export * from './contracts.js';
 export * from './testHarness.js';
 export * from './thinSlice.js';
+export * from './playback.js';
