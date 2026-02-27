@@ -35,6 +35,9 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('class="notification error"');
     expect(html).toContain('class="notification info"');
     expect(html).toContain('Unsaved changes');
+    expect(html).toContain('data-hotkey="space"');
+    expect(html).toContain('id="insert-note"');
+    expect(html).toContain('/api/notes');
   });
 
   it('renders empty states and saved styling when no stats or notifications exist', () => {

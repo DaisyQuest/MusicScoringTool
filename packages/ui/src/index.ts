@@ -141,6 +141,31 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         padding: 1.3rem;
       }
 
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        margin-top: 1rem;
+      }
+
+      .controls button,
+      .controls select,
+      .controls input {
+        background: #141a30;
+        color: var(--text);
+        border: 1px solid #3a466f;
+        border-radius: 10px;
+        padding: 0.45rem 0.65rem;
+      }
+
+      .controls button {
+        cursor: pointer;
+      }
+
+      .controls button:hover {
+        border-color: var(--accent);
+      }
+
       section {
         background: var(--panel-strong);
         border-radius: 14px;
@@ -243,6 +268,17 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         <h1>${escapeHtml(model.title)}</h1>
         <p class="subhead">${escapeHtml(model.transportLabel)} · ${escapeHtml(model.projectLabel)}</p>
         <p class="project-status">${escapeHtml(model.statusTone === 'dirty' ? 'Unsaved changes' : 'All changes saved')}</p>
+        <div class="controls" aria-label="Score controls">
+          <button type="button" data-hotkey="space">Play / Stop</button>
+          <button type="button" data-hotkey="v">Select</button>
+          <button type="button" data-hotkey="n">Note Input</button>
+          <button type="button" data-hotkey="t">Text Lines</button>
+          <select id="note-step" aria-label="Note step">
+            <option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option>
+          </select>
+          <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" />
+          <button type="button" id="insert-note">Insert Quarter Note</button>
+        </div>
       </header>
 
       <div class="layout">
@@ -257,5 +293,40 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         </section>
       </div>
     </main>
+    <script>
+      const postJson = async (path, body) => {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({ error: 'Unknown request error.' }));
+          throw new Error(payload.error || 'Request failed');
+        }
+      };
+
+      for (const button of document.querySelectorAll('[data-hotkey]')) {
+        button.addEventListener('click', async () => {
+          try {
+            await postJson('/api/hotkey', { hotkey: button.dataset.hotkey });
+            location.reload();
+          } catch (error) {
+            alert(error instanceof Error ? error.message : String(error));
+          }
+        });
+      }
+
+      document.getElementById('insert-note')?.addEventListener('click', async () => {
+        const step = document.getElementById('note-step')?.value;
+        const octave = Number(document.getElementById('note-octave')?.value);
+        try {
+          await postJson('/api/notes', { pitch: { step, octave }, duration: 'quarter', dots: 0 });
+          location.reload();
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+    </script>
   </body>
 </html>`;
