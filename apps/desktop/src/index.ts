@@ -1,5 +1,6 @@
 import { applyCommand, cloneScore, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef } from '@scorecraft/core';
 import { exportMidi } from '@scorecraft/midi';
+import { renderDesktopShellHtml, type DesktopShellUiModel } from '@scorecraft/ui';
 
 export type DesktopMode = 'select' | 'note-input' | 'text-lines';
 export type NotificationLevel = 'success' | 'error' | 'info';
@@ -266,4 +267,38 @@ export const exportMidiWithNotifications = async (
   }
 };
 
-export const desktopShellBoot = (): string => 'scorecraft-desktop-shell-ready';
+const modeLabel = (mode: DesktopMode): string => {
+  switch (mode) {
+    case 'note-input':
+      return 'Note input mode';
+    case 'text-lines':
+      return 'Text lines mode';
+    default:
+      return 'Select mode';
+  }
+};
+
+const notificationPreview = (state: DesktopShellState): DesktopShellUiModel['notifications'] =>
+  state.notifications.slice(-5).map((notification) => ({ level: notification.level, message: notification.message }));
+
+export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()): string => {
+  const measure = state.score.parts[0]?.staves[0]?.measures[0];
+  const voice = measure?.voices[0];
+
+  const model: DesktopShellUiModel = {
+    title: state.score.title,
+    modeLabel: modeLabel(state.mode),
+    transportLabel: `${state.transport.isPlaying ? 'Playing' : 'Stopped'} @ tick ${state.transport.tick}`,
+    projectLabel: state.project.path ?? 'Unsaved project',
+    statusTone: state.project.dirty ? 'dirty' : 'stable',
+    stats: [
+      { label: 'Measures', value: String(state.score.parts[0]?.staves[0]?.measures.length ?? 0) },
+      { label: 'Events in focus voice', value: String(voice?.events.length ?? 0) },
+      { label: 'Tempo', value: `${measure?.tempoBpm ?? 120} bpm` },
+      { label: 'Last action', value: state.transport.lastAction },
+    ],
+    notifications: notificationPreview(state),
+  };
+
+  return renderDesktopShellHtml(model);
+};

@@ -5,6 +5,7 @@ export default defineConfig({
     alias: {
       '@scorecraft/core': new URL('./packages/core/src/index.ts', import.meta.url).pathname,
       '@scorecraft/midi': new URL('./packages/midi/src/index.ts', import.meta.url).pathname,
+      '@scorecraft/ui': new URL('./packages/ui/src/index.ts', import.meta.url).pathname,
     },
   },
   test: {

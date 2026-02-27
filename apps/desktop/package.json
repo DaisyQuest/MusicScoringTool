@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@scorecraft/core": "0.1.0",
-    "@scorecraft/midi": "0.1.0"
+    "@scorecraft/midi": "0.1.0",
+    "@scorecraft/ui": "0.1.0"
   }
 }

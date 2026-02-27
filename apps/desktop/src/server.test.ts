@@ -14,6 +14,7 @@ const closeServer = async (desktopServer: { server: { close: (cb: (error?: Error
 };
 
 describe('desktop server', () => {
+  it('serves boot readiness HTML over HTTP', async () => {
   const startedServers: Array<Awaited<ReturnType<typeof startDesktopServer>>> = [];
 
   afterEach(async () => {
@@ -33,6 +34,9 @@ describe('desktop server', () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(body).toContain('<!doctype html>');
+    expect(body).toContain('Scorecraft Desktop');
     expect(response.headers.get('content-type')).toContain('text/plain');
     expect(body).toBe('scorecraft-desktop-shell-ready');
   });

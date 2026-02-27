@@ -24,7 +24,7 @@ export const resolveDesktopPort = (rawPort: string | undefined, fallback = DEFAU
 export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT)): DesktopServer => {
   const server = createServer((_request, response) => {
     const body = desktopShellBoot();
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(body);
   });
 

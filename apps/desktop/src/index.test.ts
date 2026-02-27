@@ -18,14 +18,18 @@ import {
 } from './index.js';
 
 describe('desktop shell', () => {
-  it('boots and creates defaults from wizard input', () => {
-    expect(desktopShellBoot()).toBe('scorecraft-desktop-shell-ready');
-
+  it('creates defaults from wizard input and renders polished boot html', () => {
     const shell = createDesktopShell({ title: '  My Score ', partName: ' Clarinet ' });
     expect(shell.score.title).toBe('My Score');
     expect(shell.score.parts[0]?.name).toBe('Clarinet');
     expect(shell.mode).toBe('select');
     expect(shell.project.dirty).toBe(false);
+
+    const html = desktopShellBoot(shell);
+    expect(html).toContain('<!doctype html>');
+    expect(html).toContain('My Score');
+    expect(html).toContain('Select mode');
+    expect(html).toContain('Stopped @ tick 0');
   });
 
   it('supports new score wizard and notification', () => {
@@ -43,7 +47,7 @@ describe('desktop shell', () => {
     state = setGhostPreview(state, { step: 'D', octave: 5 });
     expect(state.caret.ghostPitch?.step).toBe('D');
 
-    state = stepInsertNote(state, { step: 'C', octave: 4 });
+    state = stepInsertNote(state, { step: 'C', octave: 4 }, 'half', 1);
 
     const voice = state.score.parts[0]!.staves[0]!.measures[0]!.voices[0]!;
     expect(voice.events).toHaveLength(1);
@@ -51,6 +55,9 @@ describe('desktop shell', () => {
     expect(state.caret.eventIndex).toBe(1);
     expect(state.project.dirty).toBe(true);
     expect(state.caret.ghostPitch?.step).toBe('C');
+
+    state = setGhostPreview(state);
+    expect(state.caret.ghostPitch).toBeUndefined();
   });
 
   it('guards step entry outside note-input mode', () => {
@@ -89,12 +96,14 @@ describe('desktop shell', () => {
     expect(state.transport.tick).toBe(960);
   });
 
-  it('command palette filters actions', () => {
+  it('command palette filters actions by id and description', () => {
     const all = resolveCommandPalette('');
-    const filtered = resolveCommandPalette('note');
+    const byId = resolveCommandPalette('set-note');
+    const byDescription = resolveCommandPalette('transport');
 
-    expect(all.length).toBeGreaterThan(filtered.length);
-    expect(filtered.some((action) => action.id === 'set-note-mode')).toBe(true);
+    expect(all.length).toBeGreaterThan(byId.length);
+    expect(byId.some((action) => action.id === 'set-note-mode')).toBe(true);
+    expect(byDescription.some((action) => action.id === 'toggle-playback')).toBe(true);
   });
 
   it('hotkeys drive mode switching, transport toggling and palette notification', () => {
@@ -155,6 +164,11 @@ describe('desktop shell', () => {
     });
     expect(failure.notifications.at(-1)?.level).toBe('error');
     expect(failure.notifications.at(-1)?.message).toContain('disk full');
+
+    const unknownFailure = await exportMidiWithNotifications(state, '/tmp/out.mid', async () => {
+      throw 'string failure';
+    });
+    expect(unknownFailure.notifications.at(-1)?.message).toContain('Unknown export error');
   });
 
   it('throws on invalid recovery snapshot payload', () => {
@@ -185,5 +199,28 @@ describe('desktop shell', () => {
       throw new Error('permission denied');
     });
     await expect(saveProject(state, '/tmp/out.score', failing)).rejects.toThrow('permission denied');
+  });
+
+  it('renders mode and notification slices in boot view', () => {
+    let state = createDesktopShell({ title: 'Mode Matrix' });
+    state = setMode(state, 'text-lines');
+    state = updateTransport(state, { isPlaying: true, tick: 128 });
+    const withNotifications = {
+      ...state,
+      notifications: Array.from({ length: 7 }, (_, i) => ({
+        id: `n-${i}`,
+        level: (i % 3 === 0 ? 'success' : i % 3 === 1 ? 'info' : 'error') as 'success' | 'info' | 'error',
+        message: `Notice ${i}`,
+      })),
+      project: { ...state.project, path: '/tmp/demo.scorecraft.json', dirty: true },
+    };
+
+    const html = desktopShellBoot(withNotifications);
+    expect(html).toContain('Text lines mode');
+    expect(html).toContain('Playing @ tick 128');
+    expect(html).toContain('/tmp/demo.scorecraft.json');
+    expect(html).toContain('Unsaved changes');
+    expect(html).toContain('Notice 6');
+    expect(html).not.toContain('Notice 0');
   });
 });
