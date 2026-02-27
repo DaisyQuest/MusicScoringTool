@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/engraving" },
+    { "path": "packages/midi" },
+    { "path": "packages/ui" },
+    { "path": "apps/desktop" }
+  ]
+}
