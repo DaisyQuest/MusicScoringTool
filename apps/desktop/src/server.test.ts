@@ -14,14 +14,13 @@ const closeServer = async (desktopServer: { server: { close: (cb: (error?: Error
 };
 
 describe('desktop server', () => {
-  it('serves boot readiness HTML over HTTP', async () => {
   const startedServers: Array<Awaited<ReturnType<typeof startDesktopServer>>> = [];
 
   afterEach(async () => {
     await Promise.all(startedServers.splice(0).map((server) => closeServer(server)));
   });
 
-  it('serves boot readiness string over HTTP', async () => {
+  it('serves boot readiness HTML over HTTP', async () => {
     const desktopServer = await startDesktopServer(0);
     startedServers.push(desktopServer);
 
@@ -37,8 +36,6 @@ describe('desktop server', () => {
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(body).toContain('<!doctype html>');
     expect(body).toContain('Scorecraft Desktop');
-    expect(response.headers.get('content-type')).toContain('text/plain');
-    expect(body).toBe('scorecraft-desktop-shell-ready');
   });
 
   it('rejects startup when trying to bind an in-use port', async () => {
