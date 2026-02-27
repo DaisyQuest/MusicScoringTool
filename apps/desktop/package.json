@@ -8,5 +8,9 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@scorecraft/core": "0.1.0",
+    "@scorecraft/midi": "0.1.0"
   }
 }
