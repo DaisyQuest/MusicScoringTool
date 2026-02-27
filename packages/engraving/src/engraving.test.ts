@@ -90,6 +90,24 @@ const createFixtureScore = (): CanonicalScore => ({
   hairpins: [{ id: 'hairpin-1', from: 'note-1', to: 'note-3', type: 'crescendo' }],
 });
 
+
+const getPrimaryVoiceEvents = (score: CanonicalScore) => {
+  const part = score.parts[0];
+  const staff = part?.staves[0];
+  const measure = staff?.measures[0];
+  const voice = measure?.voices[0];
+  if (!part || !staff || !measure || !voice) {
+    throw new Error('Fixture score is missing primary voice structure.');
+  }
+  return {
+    part,
+    staff,
+    measure,
+    voice,
+    events: voice.events,
+  };
+};
+
 describe('engraving adapter', () => {
   it('exposes vexflow-compatible adapter contract', () => {
     const adapter = createEngravingAdapter();
@@ -172,20 +190,26 @@ describe('engraving adapter', () => {
     const score = createFixtureScore();
     score.slurs.push({ id: 'slur-missing', from: 'missing', to: 'note-1' });
     score.hairpins.push({ id: 'hairpin-missing', from: 'note-3', to: 'missing', type: 'diminuendo' });
-    const tied = score.parts[0].staves[0].measures[0].voices[0].events[0];
-    if (tied.type === 'note') tied.tieStartId = 'missing';
+    const { events } = getPrimaryVoiceEvents(score);
+    const tiedEvent = events[0];
+    expect(tiedEvent?.type).toBe('note');
+    if (!tiedEvent || tiedEvent.type !== 'note') {
+      throw new Error('Expected first fixture event to be a note.');
+    }
+    tiedEvent.tieStartId = 'missing';
 
     const render = renderScore(score);
     expect(render.primitives.some((p) => p.modelId === 'slur-missing')).toBe(false);
     expect(render.primitives.some((p) => p.modelId === 'hairpin-missing')).toBe(false);
-    expect(render.primitives.some((p) => p.kind === 'tie' && p.modelId === tied.id)).toBe(false);
+    expect(render.primitives.some((p) => p.kind === 'tie' && p.modelId === tiedEvent.id)).toBe(false);
     expect(render.svg).toContain('M ');
   });
 
 
   it('covers optional voice branches and diminuendo hairpin rendering', () => {
     const score = createFixtureScore();
-    score.parts[0].staves[0].measures.push({ id: 'measure-3', number: 3, voices: [] });
+    const { staff } = getPrimaryVoiceEvents(score);
+    staff.measures.push({ id: 'measure-3', number: 3, voices: [] });
     score.hairpins.push({ id: 'hairpin-dim', from: 'note-2', to: 'note-3', type: 'diminuendo' });
     const render = renderScore(score);
     expect(render.primitives.some((p) => p.kind === 'hairpin' && p.modelId === 'hairpin-dim')).toBe(true);
@@ -194,8 +218,9 @@ describe('engraving adapter', () => {
 
   it('renders bass clef fallback glyph and key signature flats', () => {
     const score = createFixtureScore();
-    score.parts[0].staves[0].clef = 'bass';
-    score.parts[0].staves[0].measures[0].keySignature = { fifths: -3, mode: 'minor' };
+    const { staff, measure } = getPrimaryVoiceEvents(score);
+    staff.clef = 'bass';
+    measure.keySignature = { fifths: -3, mode: 'minor' };
     const render = renderScore(score);
     expect(render.svg).toContain('𝄢');
     expect(render.svg).toContain('b3');
