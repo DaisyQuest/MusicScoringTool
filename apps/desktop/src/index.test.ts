@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyHotkey,
   addMeasure,
+  applyArticulationEdits,
   advancePlayback,
   applyInspectorEdits,
+  applyTextSymbolEdits,
   autosaveProject,
   createDesktopShell,
   desktopShellBoot,
@@ -97,6 +99,52 @@ describe('desktop shell', () => {
 
     const noPriorEvent = applyInspectorEdits(createDesktopShell(), { dynamics: 'p' });
     expect(noPriorEvent.project.dirty).toBe(false);
+  });
+
+  it('applies articulation edits to latest note and supports clearing articulation', () => {
+    let state = createDesktopShell();
+    state = setMode(state, 'note-input');
+    state = stepInsertNote(state, { step: 'C', octave: 4 });
+    state = stepInsertNote(state, { step: 'D', octave: 4 });
+
+    const withAccent = applyArticulationEdits(state, 'accent');
+    const noteEvents = withAccent.score.parts[0]!.staves[0]!.measures[0]!.voices[0]!.events;
+    const latest = noteEvents.at(-1);
+    expect(latest?.type).toBe('note');
+    expect(latest?.type === 'note' ? latest.articulations : []).toEqual(['accent']);
+    expect(withAccent.project.dirty).toBe(true);
+
+    const cleared = applyArticulationEdits(withAccent, 'none');
+    const latestCleared = cleared.score.parts[0]!.staves[0]!.measures[0]!.voices[0]!.events.at(-1);
+    expect(latestCleared?.type === 'note' ? latestCleared.articulations : []).toEqual([]);
+  });
+
+  it('throws when articulation edit is requested without a note in scope', () => {
+    expect(() => applyArticulationEdits(createDesktopShell(), 'accent')).toThrow('No note available for articulation edit.');
+  });
+
+  it('applies text/symbol edits and supports clearing chord symbols', () => {
+    const state = createDesktopShell();
+    const withText = applyTextSymbolEdits(state, { chordSymbol: 'Cm7', navigationMarker: 'DS' });
+    const measure = withText.score.parts[0]!.staves[0]!.measures[0]!;
+    expect(measure.chordSymbols).toEqual(['Cm7']);
+    expect(measure.navigationMarker).toBe('DS');
+    expect(withText.project.dirty).toBe(true);
+
+    const cleared = applyTextSymbolEdits(withText, { chordSymbol: '   ' });
+    expect(cleared.score.parts[0]!.staves[0]!.measures[0]!.chordSymbols).toEqual([]);
+  });
+
+  it('throws on invalid selection for text/symbol edits', () => {
+    const state = createDesktopShell();
+    const broken = {
+      ...state,
+      caret: {
+        ...state.caret,
+        selection: { ...state.caret.selection, measureId: 'missing-measure' },
+      },
+    };
+    expect(() => applyTextSymbolEdits(broken, { chordSymbol: 'F7' })).toThrow('Text/symbol selection is invalid.');
   });
 
   it('omits lastUpdatedAtMs when transport is stopped and preserves it in fallback updates', () => {
@@ -312,6 +360,10 @@ describe('desktop shell', () => {
     expect(html).toContain('Notice 6');
     expect(html).toContain('id="add-measure"');
     expect(html).toContain('id="apply-engraving"');
+    expect(html).toContain('id="apply-text-symbols"');
+    expect(html).toContain('id="note-articulation"');
+    expect(html).toContain('id="text-chord-symbol"');
+    expect(html).toContain('id="text-navigation-marker"');
     expect(html).not.toContain('Notice 0');
   });
 });

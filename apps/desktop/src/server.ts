@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deserializeScore } from '@scorecraft/core';
-import { addMeasure, advancePlayback, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, exportMidiWithNotifications, saveProject, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
+import { addMeasure, advancePlayback, applyArticulationEdits, applyHotkey, applyInspectorEdits, applyTextSymbolEdits, createDesktopShell, desktopShellBoot, exportMidiWithNotifications, saveProject, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
 
@@ -46,6 +46,12 @@ const sendJson = (response: ServerResponse<IncomingMessage>, statusCode: number,
 const isDynamics = (value: unknown): value is 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' =>
   value === 'pp' || value === 'p' || value === 'mp' || value === 'mf' || value === 'f' || value === 'ff';
 
+const isArticulation = (value: unknown): value is 'none' | 'accent' | 'staccato' | 'tenuto' =>
+  value === 'none' || value === 'accent' || value === 'staccato' || value === 'tenuto';
+
+const isNavigationMarker = (value: unknown): value is 'DC' | 'DS' | 'Fine' | 'Coda' =>
+  value === 'DC' || value === 'DS' || value === 'Fine' || value === 'Coda';
+
 const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtySecond' | 'sixtyFourth' => {
   switch (duration) {
     case 'whole':
@@ -66,6 +72,26 @@ const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16t
 
 export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT)): DesktopServer => {
   let shellState: DesktopShellState = createDesktopShell();
+  const undoStack: DesktopShellState[] = [];
+  const redoStack: DesktopShellState[] = [];
+
+  const commitMutation = (mutate: (state: DesktopShellState) => DesktopShellState): void => {
+    undoStack.push(structuredClone(shellState));
+    if (undoStack.length > 100) {
+      undoStack.shift();
+    }
+    shellState = mutate(shellState);
+    redoStack.length = 0;
+  };
+
+  const commitMutationAsync = async (mutate: (state: DesktopShellState) => Promise<DesktopShellState>): Promise<void> => {
+    undoStack.push(structuredClone(shellState));
+    if (undoStack.length > 100) {
+      undoStack.shift();
+    }
+    shellState = await mutate(shellState);
+    redoStack.length = 0;
+  };
 
   const server = createServer(async (request, response) => {
     shellState = advancePlayback(shellState);
@@ -104,6 +130,42 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
       return;
     }
 
+    if (request.method === 'POST' && request.url === '/api/history') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { action?: 'undo' | 'redo' };
+        if (!payload.action) {
+          sendJson(response, 400, { error: 'Missing history action.' });
+          return;
+        }
+
+        if (payload.action === 'undo') {
+          const previous = undoStack.pop();
+          if (!previous) {
+            sendJson(response, 200, { ok: true, changed: false });
+            return;
+          }
+          redoStack.push(structuredClone(shellState));
+          shellState = previous;
+          sendJson(response, 200, { ok: true, changed: true });
+          return;
+        }
+
+        const next = redoStack.pop();
+        if (!next) {
+          sendJson(response, 200, { ok: true, changed: false });
+          return;
+        }
+        undoStack.push(structuredClone(shellState));
+        shellState = next;
+        sendJson(response, 200, { ok: true, changed: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid history request.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
     if (request.method === 'POST' && request.url === '/api/hotkey') {
       try {
         const body = await readRequestBody(request);
@@ -113,7 +175,8 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           return;
         }
 
-        shellState = applyHotkey(shellState, payload.hotkey);
+        const hotkey = payload.hotkey;
+        commitMutation((state) => applyHotkey(state, hotkey));
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid request.';
@@ -122,10 +185,21 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
       return;
     }
 
+    if (request.method === 'POST' && request.url === '/api/project/new') {
+      try {
+        commitMutation(() => createDesktopShell());
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create project.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
 
     if (request.method === 'POST' && request.url === '/api/measures') {
       try {
-        shellState = addMeasure(shellState);
+        commitMutation((state) => addMeasure(state));
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to add measure.';
@@ -148,11 +222,12 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           return;
         }
 
-        if (shellState.mode !== 'note-input') {
-          shellState = setMode(shellState, 'note-input');
-        }
-
-        shellState = stepInsertNote(shellState, { step: payload.pitch.step, octave: payload.pitch.octave }, coerceDuration(payload.duration), payload.dots ?? 0);
+        const step = payload.pitch.step;
+        const octave = payload.pitch.octave;
+        commitMutation((state) => {
+          const noteModeState = state.mode !== 'note-input' ? setMode(state, 'note-input') : state;
+          return stepInsertNote(noteModeState, { step, octave }, coerceDuration(payload.duration), payload.dots ?? 0);
+        });
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to insert note.';
@@ -190,13 +265,16 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           return;
         }
 
-        const raw = await readFile(payload.path, 'utf8');
-        const loadedScore = deserializeScore(raw);
-        const nextShell = createDesktopShell({ title: loadedScore.title });
-        nextShell.score = loadedScore;
-        nextShell.project.path = payload.path;
-        nextShell.project.dirty = false;
-        shellState = nextShell;
+        const loadPath = payload.path;
+        await commitMutationAsync(async () => {
+          const raw = await readFile(loadPath, 'utf8');
+          const loadedScore = deserializeScore(raw);
+          const nextShell = createDesktopShell({ title: loadedScore.title });
+          nextShell.score = loadedScore;
+          nextShell.project.path = loadPath;
+          nextShell.project.dirty = false;
+          return nextShell;
+        });
 
         sendJson(response, 200, { ok: true, title: shellState.score.title });
       } catch (error) {
@@ -237,6 +315,7 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           repeatStart?: boolean;
           repeatEnd?: boolean;
           dynamics?: unknown;
+          articulation?: unknown;
         };
 
         if (typeof payload.tempoBpm !== 'number' || Number.isNaN(payload.tempoBpm)) {
@@ -249,16 +328,63 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           return;
         }
 
-        shellState = applyInspectorEdits(shellState, {
-          tempoBpm: payload.tempoBpm,
-          repeatStart: payload.repeatStart ?? false,
-          repeatEnd: payload.repeatEnd ?? false,
-          dynamics: payload.dynamics,
-        });
+        if (!isArticulation(payload.articulation)) {
+          sendJson(response, 400, { error: 'Invalid articulation payload.' });
+          return;
+        }
+
+        const tempoBpm = payload.tempoBpm;
+        const dynamics = payload.dynamics;
+        const articulation = payload.articulation;
+        commitMutation((state) =>
+          applyArticulationEdits(
+            applyInspectorEdits(state, {
+              tempoBpm,
+              repeatStart: payload.repeatStart ?? false,
+              repeatEnd: payload.repeatEnd ?? false,
+              dynamics,
+            }),
+            articulation,
+          ),
+        );
 
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to update engraving controls.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/text-symbols') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as {
+          chordSymbol?: unknown;
+          navigationMarker?: unknown;
+        };
+
+        if (typeof payload.chordSymbol !== 'string') {
+          sendJson(response, 400, { error: 'Invalid chord symbol payload.' });
+          return;
+        }
+
+        if (payload.navigationMarker !== undefined && payload.navigationMarker !== '' && !isNavigationMarker(payload.navigationMarker)) {
+          sendJson(response, 400, { error: 'Invalid navigation marker payload.' });
+          return;
+        }
+
+        const chordSymbol = payload.chordSymbol;
+        const navigationMarker = payload.navigationMarker === '' ? undefined : payload.navigationMarker;
+        commitMutation((state) =>
+          applyTextSymbolEdits(state, {
+            chordSymbol,
+            ...(navigationMarker !== undefined ? { navigationMarker } : {}),
+          }),
+        );
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to apply text/symbol edits.';
         sendJson(response, 400, { error: message });
       }
       return;
