@@ -33,7 +33,7 @@ describe('@scorecraft/ui', () => {
           { number: 2, notes: [], isSelected: false },
         ],
       },
-      engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, dynamics: 'mf' },
+      engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, articulation: 'accent', dynamics: 'mf', chordSymbol: 'G7', navigationMarker: 'DC' },
       entryIntent: { duration: 'eighth', accidental: 'sharp', dot: true, tie: true, chordMode: true },
       densityPreset: 'compact',
     });
@@ -58,10 +58,28 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('id="insert-note"');
     expect(html).toContain('id="add-measure"');
     expect(html).toContain('id="apply-engraving"');
+    expect(html).toContain('id="apply-text-symbols"');
+    expect(html).toContain('id="note-articulation"');
+    expect(html).toContain('id="text-chord-symbol"');
+    expect(html).toContain('id="text-navigation-marker"');
+    expect(html).toContain('id="project-new"');
+    expect(html).toContain('id="project-open"');
+    expect(html).toContain('id="project-save"');
+    expect(html).toContain('id="project-export-midi"');
+    expect(html).toContain('id="history-undo"');
+    expect(html).toContain('id="history-redo"');
     expect(html).toContain('/api/transport');
     expect(html).toContain('/api/measures');
     expect(html).toContain('/api/engraving');
     expect(html).toContain('/api/notes');
+    expect(html).toContain('/api/project/new');
+    expect(html).toContain('/api/project/load');
+    expect(html).toContain('/api/project/save');
+    expect(html).toContain('/api/midi/export');
+    expect(html).toContain('/api/history');
+    expect(html).toContain('/api/text-symbols');
+    expect(html).toContain('document.addEventListener(\'keydown\'');
+    expect(html).toContain('event.code === \'Space\' ? \'space\'');
     expect(html).toContain('Sheet music preview');
     expect(html).toContain('data-measure="1"');
     expect(html).toContain('data-measure="2"');
@@ -79,7 +97,7 @@ describe('@scorecraft/ui', () => {
       stats: [],
       notifications: [],
       scorePreview: { clef: 'bass', measures: [] },
-      engraving: { tempoBpm: 112, repeatStart: true, repeatEnd: false, dynamics: 'p' },
+      engraving: { tempoBpm: 112, repeatStart: true, repeatEnd: false, articulation: 'none', dynamics: 'p', chordSymbol: '' },
     });
 
     expect(html).toContain('No score metrics yet. Start entering notes to populate analytics.');
@@ -112,7 +130,7 @@ describe('@scorecraft/ui', () => {
       stats: [],
       notifications: [],
       scorePreview: { clef: 'treble', measures },
-      engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, dynamics: 'mf' },
+      engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, articulation: 'tenuto', dynamics: 'mf', chordSymbol: 'Dm7', navigationMarker: 'Coda' },
       densityPreset: 'default',
       entryIntent: { duration: 'half', accidental: 'flat', dot: false, tie: false, chordMode: false },
     });

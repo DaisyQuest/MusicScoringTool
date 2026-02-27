@@ -88,7 +88,7 @@ describe('desktop server', () => {
     const engravingResponse = await fetch(`${baseUrl}/api/engraving`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tempoBpm: 136, repeatStart: true, repeatEnd: true, dynamics: 'ff' }),
+      body: JSON.stringify({ tempoBpm: 136, repeatStart: true, repeatEnd: true, dynamics: 'ff', articulation: 'accent' }),
     });
     expect(engravingResponse.status).toBe(200);
 
@@ -203,7 +203,7 @@ describe('desktop server', () => {
       expect((await postJson('/api/notes', { pitch: { step, octave: 4 }, duration: 'quarter', dots: 0 })).status).toBe(200);
     }
 
-    expect((await postJson('/api/engraving', { tempoBpm: 152, repeatStart: true, repeatEnd: true, dynamics: 'ff' })).status).toBe(200);
+    expect((await postJson('/api/engraving', { tempoBpm: 152, repeatStart: true, repeatEnd: true, dynamics: 'ff', articulation: 'tenuto' })).status).toBe(200);
 
     const html = await (await fetch(baseUrl)).text();
 
@@ -297,6 +297,54 @@ describe('desktop server', () => {
     }
   });
 
+  it('supports new project plus undo/redo history controls', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const postJson = async (path: string, payload: unknown): Promise<Response> =>
+      await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+    expect((await postJson('/api/hotkey', { hotkey: 'n' })).status).toBe(200);
+    expect((await postJson('/api/notes', { pitch: { step: 'C', octave: 4 }, duration: 'quarter', dots: 0 })).status).toBe(200);
+
+    let state = (await (await fetch(`${baseUrl}/api/state`)).json()) as { eventCount: number; measureCount: number };
+    expect(state.eventCount).toBe(1);
+    expect(state.measureCount).toBe(1);
+
+    expect((await postJson('/api/history', { action: 'undo' })).status).toBe(200);
+    state = (await (await fetch(`${baseUrl}/api/state`)).json()) as { eventCount: number };
+    expect(state.eventCount).toBe(0);
+
+    expect((await postJson('/api/history', { action: 'redo' })).status).toBe(200);
+    state = (await (await fetch(`${baseUrl}/api/state`)).json()) as { eventCount: number };
+    expect(state.eventCount).toBe(1);
+
+
+    expect((await postJson('/api/text-symbols', { chordSymbol: 'Fmaj7', navigationMarker: 'Fine' })).status).toBe(200);
+    const textHtml = await (await fetch(baseUrl)).text();
+    expect(textHtml).toContain('value="Fmaj7"');
+
+    expect((await postJson('/api/project/new', {})).status).toBe(200);
+    state = (await (await fetch(`${baseUrl}/api/state`)).json()) as { eventCount: number; measureCount: number };
+    expect(state.eventCount).toBe(0);
+    expect(state.measureCount).toBe(1);
+
+    expect((await postJson('/api/history', { action: 'undo' })).status).toBe(200);
+    state = (await (await fetch(`${baseUrl}/api/state`)).json()) as { eventCount: number };
+    expect(state.eventCount).toBe(1);
+  });
+
   it('rejects malformed API payloads', async () => {
     const desktopServer = await startDesktopServer(0);
     startedServers.push(desktopServer);
@@ -330,19 +378,41 @@ describe('desktop server', () => {
     });
     expect(missingTransportAction.status).toBe(400);
 
+    const missingHistoryAction = await fetch(`${baseUrl}/api/history`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingHistoryAction.status).toBe(400);
+
     const invalidEngravingTempo = await fetch(`${baseUrl}/api/engraving`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tempoBpm: 'fast', dynamics: 'mf' }),
+      body: JSON.stringify({ tempoBpm: 'fast', dynamics: 'mf', articulation: 'none' }),
     });
     expect(invalidEngravingTempo.status).toBe(400);
 
     const invalidEngravingDynamics = await fetch(`${baseUrl}/api/engraving`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tempoBpm: 120, dynamics: 'sfffz' }),
+      body: JSON.stringify({ tempoBpm: 120, dynamics: 'sfffz', articulation: 'none' }),
     });
     expect(invalidEngravingDynamics.status).toBe(400);
+
+
+    const invalidArticulation = await fetch(`${baseUrl}/api/engraving`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tempoBpm: 120, dynamics: 'mf', articulation: 'marcato' }),
+    });
+    expect(invalidArticulation.status).toBe(400);
+
+    const invalidTextSymbols = await fetch(`${baseUrl}/api/text-symbols`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chordSymbol: 42 }),
+    });
+    expect(invalidTextSymbols.status).toBe(400);
 
     const missingSavePath = await fetch(`${baseUrl}/api/project/save`, {
       method: 'POST',

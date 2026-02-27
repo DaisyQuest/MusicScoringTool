@@ -35,7 +35,10 @@ export interface DesktopShellUiModel {
     tempoBpm: number;
     repeatStart: boolean;
     repeatEnd: boolean;
+    articulation: 'none' | 'accent' | 'staccato' | 'tenuto';
     dynamics: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
+    chordSymbol: string;
+    navigationMarker?: 'DC' | 'DS' | 'Fine' | 'Coda';
   };
   entryIntent?: {
     duration: 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
@@ -245,8 +248,9 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
     <main>
       <header class="top-shell">
         <div class="command-region" aria-label="Top command region">
-          <button type="button">New</button><button type="button">Open</button><button type="button">Save</button>
-          <button type="button">Undo</button><button type="button">Redo</button>
+          <button type="button" id="project-new">New</button><button type="button" id="project-open">Open</button><button type="button" id="project-save">Save</button>
+          <button type="button" id="project-export-midi">Export MIDI</button>
+          <button type="button" id="history-undo">Undo</button><button type="button" id="history-redo">Redo</button>
           <button type="button" data-hotkey="cmd+k">Command Palette <kbd>⌘K</kbd></button>
         </div>
         <div class="project-meta">
@@ -309,6 +313,14 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
             <label>Tempo <input id="tempo-bpm" type="number" min="20" max="320" value="${model.engraving.tempoBpm}" aria-label="Tempo BPM" /></label>
             <label><input id="repeat-start" type="checkbox" ${model.engraving.repeatStart ? 'checked' : ''} /> Repeat start</label>
             <label><input id="repeat-end" type="checkbox" ${model.engraving.repeatEnd ? 'checked' : ''} /> Repeat end</label>
+            <label>Accent / articulation
+              <select id="note-articulation" aria-label="Note articulation">
+                <option value="none" ${model.engraving.articulation === 'none' ? 'selected' : ''}>none</option>
+                <option value="accent" ${model.engraving.articulation === 'accent' ? 'selected' : ''}>accent</option>
+                <option value="staccato" ${model.engraving.articulation === 'staccato' ? 'selected' : ''}>staccato</option>
+                <option value="tenuto" ${model.engraving.articulation === 'tenuto' ? 'selected' : ''}>tenuto</option>
+              </select>
+            </label>
             <label>Dynamics
               <select id="note-dynamics" aria-label="Note dynamics">
                 <option value="pp" ${model.engraving.dynamics === 'pp' ? 'selected' : ''}>pp</option>
@@ -319,7 +331,18 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
                 <option value="ff" ${model.engraving.dynamics === 'ff' ? 'selected' : ''}>ff</option>
               </select>
             </label>
+            <label>Chord symbol <input id="text-chord-symbol" type="text" value="${escapeHtml(model.engraving.chordSymbol)}" aria-label="Chord symbol" placeholder="Cm7" /></label>
+            <label>Navigation marker
+              <select id="text-navigation-marker" aria-label="Navigation marker">
+                <option value="">none</option>
+                <option value="DC" ${model.engraving.navigationMarker === 'DC' ? 'selected' : ''}>DC</option>
+                <option value="DS" ${model.engraving.navigationMarker === 'DS' ? 'selected' : ''}>DS</option>
+                <option value="Fine" ${model.engraving.navigationMarker === 'Fine' ? 'selected' : ''}>Fine</option>
+                <option value="Coda" ${model.engraving.navigationMarker === 'Coda' ? 'selected' : ''}>Coda</option>
+              </select>
+            </label>
             <button type="button" id="apply-engraving">Apply Engraving</button>
+            <button type="button" id="apply-text-symbols">Apply Text & Symbols</button>
           </div>
           <div class="utility-flyout">
             <h2>Utility flyout</h2>
@@ -353,11 +376,20 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
         }
       };
 
+      const askPath = (label, fallbackPath) => {
+        const value = window.prompt(label, fallbackPath);
+        return value && value.trim() ? value.trim() : undefined;
+      };
+
+      const runAction = async (path, payload = {}) => {
+        await postJson(path, payload);
+        location.reload();
+      };
+
       for (const button of document.querySelectorAll('[data-hotkey]')) {
         button.addEventListener('click', async () => {
           try {
-            await postJson('/api/hotkey', { hotkey: button.dataset.hotkey });
-            location.reload();
+            await runAction('/api/hotkey', { hotkey: button.dataset.hotkey });
           } catch (error) {
             alert(error instanceof Error ? error.message : String(error));
           }
@@ -367,8 +399,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
       for (const button of document.querySelectorAll('[data-transport-action]')) {
         button.addEventListener('click', async () => {
           try {
-            await postJson('/api/transport', { action: button.dataset.transportAction });
-            location.reload();
+            await runAction('/api/transport', { action: button.dataset.transportAction });
           } catch (error) {
             alert(error instanceof Error ? error.message : String(error));
           }
@@ -379,8 +410,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
         const step = document.getElementById('note-step')?.value;
         const octave = Number(document.getElementById('note-octave')?.value);
         try {
-          await postJson('/api/notes', { pitch: { step, octave }, duration: 'quarter', dots: 0 });
-          location.reload();
+          await runAction('/api/notes', { pitch: { step, octave }, duration: 'quarter', dots: 0 });
         } catch (error) {
           alert(error instanceof Error ? error.message : String(error));
         }
@@ -388,8 +418,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
 
       document.getElementById('add-measure')?.addEventListener('click', async () => {
         try {
-          await postJson('/api/measures', {});
-          location.reload();
+          await runAction('/api/measures', {});
         } catch (error) {
           alert(error instanceof Error ? error.message : String(error));
         }
@@ -400,10 +429,92 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
         const repeatStart = Boolean(document.getElementById('repeat-start')?.checked);
         const repeatEnd = Boolean(document.getElementById('repeat-end')?.checked);
         const dynamics = document.getElementById('note-dynamics')?.value;
+        const articulation = document.getElementById('note-articulation')?.value;
 
         try {
-          await postJson('/api/engraving', { tempoBpm, repeatStart, repeatEnd, dynamics });
-          location.reload();
+          await runAction('/api/engraving', { tempoBpm, repeatStart, repeatEnd, dynamics, articulation });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('apply-text-symbols')?.addEventListener('click', async () => {
+        const chordSymbol = document.getElementById('text-chord-symbol')?.value ?? '';
+        const navigationMarker = document.getElementById('text-navigation-marker')?.value || undefined;
+        try {
+          await runAction('/api/text-symbols', { chordSymbol, navigationMarker });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('project-new')?.addEventListener('click', async () => {
+        try {
+          await runAction('/api/project/new', {});
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('project-open')?.addEventListener('click', async () => {
+        const path = askPath('Open score from path:', 'session.scorecraft.json');
+        if (!path) return;
+        try {
+          await runAction('/api/project/load', { path });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('project-save')?.addEventListener('click', async () => {
+        const path = askPath('Save score to path:', 'session.scorecraft.json');
+        if (!path) return;
+        try {
+          await runAction('/api/project/save', { path });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('project-export-midi')?.addEventListener('click', async () => {
+        const path = askPath('Export MIDI to path:', 'session.mid');
+        if (!path) return;
+        try {
+          await runAction('/api/midi/export', { path });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('history-undo')?.addEventListener('click', async () => {
+        try {
+          await runAction('/api/history', { action: 'undo' });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('history-redo')?.addEventListener('click', async () => {
+        try {
+          await runAction('/api/history', { action: 'redo' });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.addEventListener('keydown', async (event) => {
+        if (event.defaultPrevented || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
+          return;
+        }
+
+        const hotkey = event.code === 'Space' ? 'space' : event.key.toLowerCase();
+        if (!['space', 'v', 'n', 't'].includes(hotkey)) {
+          return;
+        }
+
+        event.preventDefault();
+        try {
+          await runAction('/api/hotkey', { hotkey });
         } catch (error) {
           alert(error instanceof Error ? error.message : String(error));
         }

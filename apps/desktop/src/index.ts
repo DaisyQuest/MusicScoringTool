@@ -169,7 +169,7 @@ export const applyInspectorEdits = (
     dynamics: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
   }>,
 ): DesktopShellState => {
-  let next = cloneScore(state.score);
+  const next = cloneScore(state.score);
   const selection = state.caret.selection;
   const part = next.parts.find((item) => item.id === selection.partId);
   const staff = part?.staves.find((item) => item.id === selection.staffId);
@@ -193,11 +193,71 @@ export const applyInspectorEdits = (
     dirty = true;
   }
   if (edits.dynamics) {
-    const event = voice.events[state.caret.eventIndex - 1];
+    const event = [...voice.events].reverse().find((candidate) => candidate.type === 'note');
     if (event?.type === 'note') {
       event.dynamics = edits.dynamics;
       dirty = true;
     }
+  }
+
+  return {
+    ...state,
+    score: next,
+    project: { ...state.project, dirty: state.project.dirty || dirty },
+  };
+};
+
+export const applyArticulationEdits = (
+  state: DesktopShellState,
+  articulation: 'none' | 'accent' | 'staccato' | 'tenuto',
+): DesktopShellState => {
+  const next = cloneScore(state.score);
+  const selection = state.caret.selection;
+  const part = next.parts.find((item) => item.id === selection.partId);
+  const staff = part?.staves.find((item) => item.id === selection.staffId);
+  const measure = staff?.measures.find((item) => item.id === selection.measureId);
+  const voice = measure?.voices.find((item) => item.id === selection.voiceId);
+  const note = [...(voice?.events ?? [])].reverse().find((candidate) => candidate.type === 'note');
+  if (!note || note.type !== 'note') {
+    throw new Error('No note available for articulation edit.');
+  }
+
+  if (articulation === 'none') {
+    note.articulations = [];
+  } else {
+    note.articulations = [articulation];
+  }
+
+  return {
+    ...state,
+    score: next,
+    project: { ...state.project, dirty: true },
+  };
+};
+
+export const applyTextSymbolEdits = (
+  state: DesktopShellState,
+  edits: { chordSymbol?: string; navigationMarker?: 'DC' | 'DS' | 'Fine' | 'Coda' },
+): DesktopShellState => {
+  const next = cloneScore(state.score);
+  const selection = state.caret.selection;
+  const part = next.parts.find((item) => item.id === selection.partId);
+  const staff = part?.staves.find((item) => item.id === selection.staffId);
+  const measure = staff?.measures.find((item) => item.id === selection.measureId);
+  if (!measure) {
+    throw new Error('Text/symbol selection is invalid.');
+  }
+
+  let dirty = false;
+  if (edits.chordSymbol !== undefined) {
+    const symbol = edits.chordSymbol.trim();
+    measure.chordSymbols = symbol ? [symbol] : [];
+    dirty = true;
+  }
+
+  if (edits.navigationMarker !== undefined) {
+    measure.navigationMarker = edits.navigationMarker;
+    dirty = true;
   }
 
   return {
@@ -438,10 +498,19 @@ export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()
       tempoBpm: measure?.tempoBpm ?? 120,
       repeatStart: measure?.repeatStart ?? false,
       repeatEnd: measure?.repeatEnd ?? false,
+      articulation: (() => {
+        const latest = [...(voice?.events ?? [])].reverse().find((event) => event.type === 'note');
+        if (!latest || latest.type !== 'note') {
+          return 'none';
+        }
+        return (latest.articulations[0] ?? 'none') as 'none' | 'accent' | 'staccato' | 'tenuto';
+      })(),
       dynamics: (() => {
         const latest = [...(voice?.events ?? [])].reverse().find((event) => event.type === 'note');
         return latest && latest.type === 'note' && latest.dynamics ? latest.dynamics : 'mf';
       })(),
+      chordSymbol: measure?.chordSymbols[0] ?? '',
+      ...(measure?.navigationMarker ? { navigationMarker: measure.navigationMarker } : {}),
     },
     entryIntent: {
       duration: 'quarter',
