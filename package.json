@@ -11,7 +11,8 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "lint": "eslint . --ext .ts",
-    "format": "prettier --check ."
+    "format": "prettier --check .",
+    "server": "npm run build && node apps/desktop/dist/server.js"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

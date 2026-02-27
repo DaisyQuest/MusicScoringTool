@@ -172,7 +172,12 @@ const registerPrimitive = (
   modelId?: string,
   id?: string,
 ): Primitive => {
-  const primitive = { id: id ?? `${kind}-${primitives.length + 1}`, kind, bbox, modelId };
+  const primitive: Primitive = {
+    id: id ?? `${kind}-${primitives.length + 1}`,
+    kind,
+    bbox,
+    ...(modelId ? { modelId } : {}),
+  };
   primitives.push(primitive);
   return primitive;
 };
