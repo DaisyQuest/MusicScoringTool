@@ -99,6 +99,23 @@ describe('desktop shell', () => {
     expect(noPriorEvent.project.dirty).toBe(false);
   });
 
+  it('omits lastUpdatedAtMs when transport is stopped and preserves it in fallback updates', () => {
+    const idle = createDesktopShell();
+
+    const stoppedSeek = updateTransport(idle, { tick: 240, nowMs: 50 });
+    expect(stoppedSeek.transport.lastAction).toBe('seek');
+    expect(Object.hasOwn(stoppedSeek.transport, 'lastUpdatedAtMs')).toBe(false);
+
+    const playing = updateTransport(idle, { isPlaying: true, nowMs: 100 });
+    const fallbackPlaying = updateTransport(playing, { nowMs: 250 });
+    expect(fallbackPlaying.transport.lastAction).toBe('play');
+    expect(fallbackPlaying.transport.lastUpdatedAtMs).toBe(100);
+
+    const fallbackStopped = updateTransport(stoppedSeek, { nowMs: 300 });
+    expect(fallbackStopped.transport.lastAction).toBe('stop');
+    expect(Object.hasOwn(fallbackStopped.transport, 'lastUpdatedAtMs')).toBe(false);
+  });
+
   it('updates transport state for play/stop/seek actions', () => {
     let state = createDesktopShell();
     state = updateTransport(state, { isPlaying: true, nowMs: 10 });

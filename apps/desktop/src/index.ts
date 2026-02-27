@@ -251,17 +251,18 @@ export const updateTransport = (
   const nowMs = update.nowMs ?? Date.now();
   const isPlaying = update.isPlaying ?? state.transport.isPlaying;
   const tick = update.tick ?? state.transport.tick;
+  const { lastUpdatedAtMs: previousLastUpdatedAtMs, ...transportWithoutLastUpdatedAtMs } = state.transport;
 
   if (update.tick !== undefined) {
     return {
       ...state,
       transport: {
-        ...state.transport,
+        ...transportWithoutLastUpdatedAtMs,
         isPlaying,
         tick,
         tickRemainder: 0,
-        lastUpdatedAtMs: isPlaying ? nowMs : undefined,
         lastAction: 'seek',
+        ...(isPlaying ? { lastUpdatedAtMs: nowMs } : {}),
       },
     };
   }
@@ -270,12 +271,12 @@ export const updateTransport = (
     return {
       ...state,
       transport: {
-        ...state.transport,
+        ...transportWithoutLastUpdatedAtMs,
         isPlaying,
         tick,
         tickRemainder: isPlaying ? state.transport.tickRemainder ?? 0 : 0,
-        lastUpdatedAtMs: isPlaying ? nowMs : undefined,
         lastAction: isPlaying ? 'play' : 'stop',
+        ...(isPlaying ? { lastUpdatedAtMs: nowMs } : {}),
       },
     };
   }
@@ -284,12 +285,12 @@ export const updateTransport = (
   return {
     ...state,
     transport: {
-      ...state.transport,
+      ...transportWithoutLastUpdatedAtMs,
       isPlaying,
       tick,
       lastAction: fallbackAction,
-      lastUpdatedAtMs: isPlaying ? state.transport.lastUpdatedAtMs ?? nowMs : undefined,
       tickRemainder: isPlaying ? state.transport.tickRemainder ?? 0 : 0,
+      ...(isPlaying ? { lastUpdatedAtMs: previousLastUpdatedAtMs ?? nowMs } : {}),
     },
   };
 };
