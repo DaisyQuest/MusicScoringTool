@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { desktopShellBoot } from './index.js';
+import { applyHotkey, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, type DesktopShellState } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
 
@@ -23,9 +23,72 @@ export const resolveDesktopPort = (rawPort: string | undefined, fallback = DEFAU
   return port;
 };
 
+const readRequestBody = async (request: Parameters<typeof createServer>[0]): Promise<string> =>
+  await new Promise<string>((resolveBody, rejectBody) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => {
+      body += chunk;
+    });
+    request.on('end', () => resolveBody(body));
+    request.on('error', (error) => rejectBody(error));
+  });
+
+const sendJson = (response: Parameters<Parameters<typeof createServer>[1]>[1], statusCode: number, payload: unknown): void => {
+  response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(payload));
+};
+
 export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT)): DesktopServer => {
-  const server = createServer((_request, response) => {
-    const body = desktopShellBoot();
+  let shellState: DesktopShellState = createDesktopShell();
+
+  const server = createServer(async (request, response) => {
+    if (request.method === 'POST' && request.url === '/api/hotkey') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { hotkey?: 'space' | 'v' | 'n' | 't' | 'cmd+k' };
+        if (!payload.hotkey) {
+          sendJson(response, 400, { error: 'Missing hotkey value.' });
+          return;
+        }
+
+        shellState = applyHotkey(shellState, payload.hotkey);
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid request.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+    if (request.method === 'POST' && request.url === '/api/notes') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as {
+          pitch?: { step?: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'; octave?: number };
+          duration?: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th';
+          dots?: 0 | 1 | 2;
+        };
+
+        if (!payload.pitch?.step || typeof payload.pitch.octave !== 'number') {
+          sendJson(response, 400, { error: 'Invalid pitch payload.' });
+          return;
+        }
+
+        if (shellState.mode !== 'note-input') {
+          shellState = setMode(shellState, 'note-input');
+        }
+
+        shellState = stepInsertNote(shellState, { step: payload.pitch.step, octave: payload.pitch.octave }, payload.duration ?? 'quarter', payload.dots ?? 0);
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to insert note.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+    const body = desktopShellBoot(shellState);
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(body);
   });

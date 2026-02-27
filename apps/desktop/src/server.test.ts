@@ -43,6 +43,72 @@ describe('desktop server', () => {
     expect(body).toContain('Scorecraft Desktop');
   });
 
+  it('accepts hotkey + note entry API calls and updates shell metrics', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const hotkeyResponse = await fetch(`${baseUrl}/api/hotkey`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hotkey: 'n' }),
+    });
+    expect(hotkeyResponse.status).toBe(200);
+
+    const noteResponse = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: 'quarter', dots: 0 }),
+    });
+    expect(noteResponse.status).toBe(200);
+
+    const html = await (await fetch(baseUrl)).text();
+    expect(html).toContain('Events in focus voice');
+    expect(html).toContain('>1<');
+    expect(html).toContain('Unsaved changes');
+  });
+
+  it('rejects malformed API payloads', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const missingHotkey = await fetch(`${baseUrl}/api/hotkey`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingHotkey.status).toBe(400);
+    expect(await missingHotkey.json()).toMatchObject({ error: expect.stringContaining('Missing hotkey') });
+
+    const invalidJson = await fetch(`${baseUrl}/api/hotkey`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{',
+    });
+    expect(invalidJson.status).toBe(400);
+
+    const invalidNote = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { octave: 4 } }),
+    });
+    expect(invalidNote.status).toBe(400);
+    expect(await invalidNote.json()).toMatchObject({ error: expect.stringContaining('Invalid pitch') });
+  });
+
   it('rejects startup when trying to bind an in-use port', async () => {
     const firstServer = await startDesktopServer(0);
     startedServers.push(firstServer);
