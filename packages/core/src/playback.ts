@@ -188,6 +188,7 @@ export const generatePlaybackEvents = (
 
       for (let visitIndex = 0; visitIndex < traversal.order.length; visitIndex += 1) {
         const visit = traversal.order[visitIndex];
+        if (!visit) continue;
         const measure = staff.measures.find((m) => m.id === visit.measureId);
         if (!measure) continue;
 
@@ -196,6 +197,7 @@ export const generatePlaybackEvents = (
           const measureStartTick = traversal.order
             .slice(0, visitIndex)
             .reduce((acc, priorVisit) => {
+              if (!priorVisit) return acc;
               const priorMeasure = staff.measures.find((m) => m.id === priorVisit.measureId);
               if (!priorMeasure) return acc;
               const maxVoiceTicks = priorMeasure.voices.reduce((voiceMax, priorVoice) => {
