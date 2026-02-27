@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyHotkey, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, type DesktopShellState } from './index.js';
+import { addMeasure, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
 
@@ -39,6 +39,11 @@ const sendJson = (response: ServerResponse<IncomingMessage>, statusCode: number,
   response.end(JSON.stringify(payload));
 };
 
+
+
+const isDynamics = (value: unknown): value is 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' =>
+  value === 'pp' || value === 'p' || value === 'mp' || value === 'mf' || value === 'f' || value === 'ff';
+
 const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' => {
   switch (duration) {
     case 'whole':
@@ -57,6 +62,30 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
   let shellState: DesktopShellState = createDesktopShell();
 
   const server = createServer(async (request, response) => {
+
+    if (request.method === 'POST' && request.url === '/api/transport') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as { action?: 'toggle-playback' | 'seek-start' };
+        if (!payload.action) {
+          sendJson(response, 400, { error: 'Missing transport action.' });
+          return;
+        }
+
+        if (payload.action === 'seek-start') {
+          shellState = updateTransport(shellState, { tick: 0, isPlaying: false });
+        } else {
+          shellState = updateTransport(shellState, { isPlaying: !shellState.transport.isPlaying });
+        }
+
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid transport request.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
     if (request.method === 'POST' && request.url === '/api/hotkey') {
       try {
         const body = await readRequestBody(request);
@@ -70,6 +99,18 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid request.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+
+    if (request.method === 'POST' && request.url === '/api/measures') {
+      try {
+        shellState = addMeasure(shellState);
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to add measure.';
         sendJson(response, 400, { error: message });
       }
       return;
@@ -97,6 +138,42 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to insert note.';
+        sendJson(response, 400, { error: message });
+      }
+      return;
+    }
+
+
+    if (request.method === 'POST' && request.url === '/api/engraving') {
+      try {
+        const body = await readRequestBody(request);
+        const payload = JSON.parse(body) as {
+          tempoBpm?: number;
+          repeatStart?: boolean;
+          repeatEnd?: boolean;
+          dynamics?: unknown;
+        };
+
+        if (typeof payload.tempoBpm !== 'number' || Number.isNaN(payload.tempoBpm)) {
+          sendJson(response, 400, { error: 'Invalid tempo payload.' });
+          return;
+        }
+
+        if (!isDynamics(payload.dynamics)) {
+          sendJson(response, 400, { error: 'Invalid dynamics payload.' });
+          return;
+        }
+
+        shellState = applyInspectorEdits(shellState, {
+          tempoBpm: payload.tempoBpm,
+          repeatStart: payload.repeatStart ?? false,
+          repeatEnd: payload.repeatEnd ?? false,
+          dynamics: payload.dynamics,
+        });
+
+        sendJson(response, 200, { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to update engraving controls.';
         sendJson(response, 400, { error: message });
       }
       return;
