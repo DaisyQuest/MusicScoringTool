@@ -1,0 +1,39 @@
+{
+  "tokens": [
+    {
+      "tokenId": "staff_3_clef",
+      "kind": "clef",
+      "sourceObjectId": "staff_3"
+    },
+    {
+      "tokenId": "measure_4_bar",
+      "kind": "barline",
+      "sourceObjectId": "measure_4"
+    },
+    {
+      "tokenId": "note_6_token",
+      "kind": "note",
+      "sourceObjectId": "note_6"
+    }
+  ],
+  "glyphs": [
+    {
+      "glyph": "treble",
+      "x": 10,
+      "y": 20,
+      "sourceTokenId": "staff_3_clef"
+    },
+    {
+      "glyph": "|",
+      "x": 30,
+      "y": 20,
+      "sourceTokenId": "measure_4_bar"
+    },
+    {
+      "glyph": "♪",
+      "x": 45,
+      "y": 20,
+      "sourceTokenId": "note_6_token"
+    }
+  ]
+}
