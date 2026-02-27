@@ -37,6 +37,14 @@ export interface DesktopShellUiModel {
     repeatEnd: boolean;
     dynamics: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
   };
+  entryIntent?: {
+    duration: 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
+    accidental: 'flat' | 'natural' | 'sharp';
+    dot: boolean;
+    tie: boolean;
+    chordMode: boolean;
+  };
+  densityPreset?: 'compact' | 'default';
 }
 
 export const defaultBindings: KeyboardCommandBinding[] = [
@@ -135,7 +143,33 @@ const renderScorePreview = (preview: DesktopShellUiModel['scorePreview']): strin
   return `<section><h2>Sheet music preview</h2><p class="subhead">${safeClef} clef · ${preview.measures.length} measure${preview.measures.length === 1 ? '' : 's'}</p><div class="score-preview-grid">${systems.join('')}</div></section>`;
 };
 
-export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<!doctype html>
+const inferActiveMode = (modeLabel: string): 'select' | 'note-input' | 'text-lines' => {
+  const normalized = modeLabel.trim().toLowerCase();
+  if (normalized.includes('note')) {
+    return 'note-input';
+  }
+  if (normalized.includes('text')) {
+    return 'text-lines';
+  }
+  return 'select';
+};
+
+const playbackStatusTone = (transportLabel: string): 'active' | 'idle' =>
+  transportLabel.toLowerCase().includes('playing') ? 'active' : 'idle';
+
+export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
+  const activeMode = inferActiveMode(model.modeLabel);
+  const playbackTone = playbackStatusTone(model.transportLabel);
+  const intent = model.entryIntent ?? {
+    duration: 'quarter',
+    accidental: 'natural',
+    dot: false,
+    tie: false,
+    chordMode: false,
+  };
+  const densityPreset = model.densityPreset ?? 'default';
+
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -157,265 +191,154 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
       }
 
       * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        background: radial-gradient(circle at top right, #253369 0%, var(--bg) 55%);
-        color: var(--text);
-        display: flex;
-        justify-content: center;
-        padding: 2rem;
-      }
-
-      main {
-        width: min(1160px, 100%);
-        background: color-mix(in oklab, var(--panel), black 20%);
-        border: 1px solid #2f3452;
-        border-radius: 20px;
-        box-shadow: 0 30px 70px rgb(5 6 16 / 45%);
-        overflow: hidden;
-      }
-
-      header {
-        padding: 1.5rem 1.75rem;
-        border-bottom: 1px solid #2f3452;
-        background: linear-gradient(125deg, #202a4a, #1a1e34 45%, #141422);
-      }
-
-      .mode-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.2rem 0.6rem;
-        border-radius: 999px;
-        background: rgb(110 231 255 / 18%);
-        color: var(--accent);
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-      }
-
-      .subhead {
-        color: var(--muted);
-        margin: 0.4rem 0 0;
-      }
-
-      .layout {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 1rem;
-        padding: 1.3rem;
-      }
-
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.55rem;
-        margin-top: 1rem;
-      }
-
-      .controls button,
-      .controls select,
-      .controls input {
-        background: #141a30;
-        color: var(--text);
-        border: 1px solid #3a466f;
-        border-radius: 10px;
-        padding: 0.45rem 0.65rem;
-      }
-
-      .controls button {
-        cursor: pointer;
-      }
-
-      .controls button:hover {
-        border-color: var(--accent);
-      }
-
-      section {
-        background: var(--panel-strong);
-        border-radius: 14px;
-        border: 1px solid #313755;
-        padding: 1rem;
-      }
-
-      h1 {
-        margin: 0.6rem 0 0;
-        font-size: clamp(1.2rem, 2.5vw, 1.8rem);
-      }
-
-      h2 {
-        margin: 0;
-        font-size: 0.98rem;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
-
-      .project-status {
-        margin-top: 0.9rem;
-        color: ${model.statusTone === 'dirty' ? 'var(--warning)' : 'var(--success)'};
-        font-weight: 600;
-      }
-
-      .stats-grid {
-        margin: 0.9rem 0 0;
-        padding: 0;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-        gap: 0.7rem;
-      }
-
-      .stat-card {
-        background: #171d35;
-        border: 1px solid #374167;
-        border-radius: 12px;
-        padding: 0.65rem;
-      }
-
-      .stat-card dt {
-        font-size: 0.74rem;
-        color: var(--muted);
-        margin-bottom: 0.3rem;
-      }
-
-      .stat-card dd {
-        margin: 0;
-        font-size: 1.1rem;
-        font-weight: 700;
-      }
-
-      .notification-list {
-        list-style: none;
-        margin: 0.9rem 0 0;
-        padding: 0;
-        display: grid;
-        gap: 0.55rem;
-      }
-
-      .notification {
-        border-radius: 10px;
-        padding: 0.65rem 0.75rem;
-        border: 1px solid transparent;
-      }
-
-      .notification.info {
-        background: rgb(96 165 250 / 16%);
-        border-color: rgb(125 211 252 / 40%);
-      }
-
-      .notification.success {
-        background: rgb(52 211 153 / 16%);
-        border-color: rgb(167 243 208 / 40%);
-      }
-
-      .notification.error {
-        background: rgb(251 113 133 / 16%);
-        border-color: rgb(251 113 133 / 35%);
-      }
-
-      .score-preview-grid {
-        display: grid;
-        gap: 0.8rem;
-        margin-top: 0.85rem;
-      }
-
-      .staff-preview {
-        width: 100%;
-        border-radius: 12px;
-        border: 1px solid #374167;
-        background: #171d35;
-      }
-
-      .staff-lines line,
-      .staff-note line {
-        stroke: #9ea8d6;
-        stroke-width: 1.6;
-      }
-
-      .measure-bg {
-        fill: rgb(15 20 35 / 50%);
-        stroke: #35406a;
-        stroke-width: 1;
-      }
-
-      .measure.selected .measure-bg {
-        stroke: var(--accent);
-        stroke-width: 2;
-      }
-
-      .staff-note ellipse {
-        fill: #f6f7ff;
-      }
-
-      .clef {
-        font-size: 45px;
-        fill: #d9def8;
-      }
-
-      .measure-label {
-        fill: var(--muted);
-        font-size: 11px;
-      }
-
-      .placeholder-note {
-        fill: var(--muted);
-      }
-
-      .empty-state {
-        margin: 0.9rem 0 0;
-        color: var(--muted);
-        font-style: italic;
-      }
+      body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top right, #253369 0%, var(--bg) 55%); color: var(--text); padding: 1rem; }
+      main { width: min(1280px, 100%); margin: 0 auto; background: color-mix(in oklab, var(--panel), black 20%); border: 1px solid #2f3452; border-radius: 20px; box-shadow: 0 30px 70px rgb(5 6 16 / 45%); overflow: hidden; }
+      button, select, input { background: #141a30; color: var(--text); border: 1px solid #3a466f; border-radius: 10px; padding: 0.45rem 0.65rem; }
+      button { cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      .top-shell { padding: 1rem 1.3rem; border-bottom: 1px solid #2f3452; background: linear-gradient(125deg, #202a4a, #1a1e34 45%, #141422); display: grid; gap: 0.75rem; }
+      .command-region { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+      .project-meta { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+      .mode-tabs { display: inline-flex; gap: 0.35rem; }
+      .mode-tab.active { border-color: var(--accent); color: var(--accent); }
+      .status-bar { display: flex; gap: 0.65rem; flex-wrap: wrap; }
+      .status-chip { border-radius: 999px; padding: 0.2rem 0.6rem; border: 1px solid #374167; font-size: 0.8rem; color: var(--muted); }
+      .status-chip.playback-active { color: var(--accent); border-color: var(--accent); }
+      .status-chip.project-dirty { color: var(--warning); border-color: var(--warning); }
+      .workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr) 300px; gap: 1rem; padding: 1rem; }
+      .panel { background: var(--panel-strong); border-radius: 14px; border: 1px solid #313755; padding: 0.9rem; }
+      .left-rail ul { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; gap: 0.5rem; }
+      .left-rail li { display: flex; justify-content: space-between; border: 1px solid #374167; border-radius: 10px; padding: 0.45rem 0.55rem; }
+      .score-stage .entry-strip { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
+      .entry-chip { border: 1px solid #374167; border-radius: 999px; padding: 0.2rem 0.5rem; color: var(--muted); }
+      .entry-chip.active { border-color: var(--accent); color: var(--accent); }
+      .inspector-grid { display: grid; gap: ${densityPreset === 'compact' ? '0.45rem' : '0.75rem'}; }
+      .utility-flyout { margin-top: 0.8rem; border-top: 1px dashed #3a466f; padding-top: 0.8rem; }
+      .transport-strip { border-top: 1px solid #2f3452; padding: 0.8rem 1.3rem 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+      .subhead { color: var(--muted); margin: 0.4rem 0 0; }
+      h1 { margin: 0.4rem 0 0; font-size: clamp(1.1rem, 2.3vw, 1.6rem); }
+      h2 { margin: 0; font-size: 0.86rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+      .project-status { margin: 0.4rem 0 0; color: ${model.statusTone === 'dirty' ? 'var(--warning)' : 'var(--success)'}; font-weight: 600; }
+      .stats-grid { margin: 0.7rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.55rem; }
+      .stat-card { background: #171d35; border: 1px solid #374167; border-radius: 12px; padding: 0.65rem; }
+      .stat-card dt { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.3rem; }
+      .stat-card dd { margin: 0; font-size: 1.1rem; font-weight: 700; }
+      .notification-list { list-style: none; margin: 0.7rem 0 0; padding: 0; display: grid; gap: 0.45rem; }
+      .notification { border-radius: 10px; padding: 0.65rem 0.75rem; border: 1px solid transparent; }
+      .notification.info { background: rgb(96 165 250 / 16%); border-color: rgb(125 211 252 / 40%); }
+      .notification.success { background: rgb(52 211 153 / 16%); border-color: rgb(167 243 208 / 40%); }
+      .notification.error { background: rgb(251 113 133 / 16%); border-color: rgb(251 113 133 / 35%); }
+      .score-preview-grid { display: grid; gap: 0.8rem; margin-top: 0.85rem; }
+      .staff-preview { width: 100%; border-radius: 12px; border: 1px solid #374167; background: #171d35; }
+      .staff-lines line, .staff-note line { stroke: #9ea8d6; stroke-width: 1.6; }
+      .measure-bg { fill: rgb(15 20 35 / 50%); stroke: #35406a; stroke-width: 1; }
+      .measure.selected .measure-bg { stroke: var(--accent); stroke-width: 2; }
+      .staff-note ellipse { fill: #f6f7ff; }
+      .clef { font-size: 45px; fill: #d9def8; }
+      .measure-label { fill: var(--muted); font-size: 11px; }
+      .placeholder-note { fill: var(--muted); }
+      .empty-state { margin: 0.9rem 0 0; color: var(--muted); font-style: italic; }
+      kbd { border: 1px solid #4b5888; border-bottom-width: 2px; border-radius: 6px; padding: 0.05rem 0.35rem; font-size: 0.72rem; color: #d9def8; background: #0f1428; }
     </style>
   </head>
   <body>
     <main>
-      <header>
-        <span class="mode-pill">${escapeHtml(model.modeLabel)}</span>
-        <h1>${escapeHtml(model.title)}</h1>
-        <p class="subhead">${escapeHtml(model.transportLabel)} · ${escapeHtml(model.projectLabel)}</p>
-        <p class="project-status">${escapeHtml(model.statusTone === 'dirty' ? 'Unsaved changes' : 'All changes saved')}</p>
-        <div class="controls" aria-label="Score controls">
-          <button type="button" data-transport-action="toggle-playback">Play / Stop</button>
-          <button type="button" data-transport-action="seek-start">Rewind</button>
-          <button type="button" data-hotkey="v">Select</button>
-          <button type="button" data-hotkey="n">Note Input</button>
-          <button type="button" data-hotkey="t">Text Lines</button>
-          <select id="note-step" aria-label="Note step">
-            <option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option>
-          </select>
-          <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" />
-          <button type="button" id="insert-note">Insert Quarter Note</button>
-          <button type="button" id="add-measure">Add Measure</button>
-          <input id="tempo-bpm" type="number" min="20" max="320" value="${model.engraving.tempoBpm}" aria-label="Tempo BPM" />
-          <label><input id="repeat-start" type="checkbox" ${model.engraving.repeatStart ? 'checked' : ''} /> Repeat start</label>
-          <label><input id="repeat-end" type="checkbox" ${model.engraving.repeatEnd ? 'checked' : ''} /> Repeat end</label>
-          <select id="note-dynamics" aria-label="Note dynamics">
-            <option value="pp" ${model.engraving.dynamics === 'pp' ? 'selected' : ''}>pp</option>
-            <option value="p" ${model.engraving.dynamics === 'p' ? 'selected' : ''}>p</option>
-            <option value="mp" ${model.engraving.dynamics === 'mp' ? 'selected' : ''}>mp</option>
-            <option value="mf" ${model.engraving.dynamics === 'mf' ? 'selected' : ''}>mf</option>
-            <option value="f" ${model.engraving.dynamics === 'f' ? 'selected' : ''}>f</option>
-            <option value="ff" ${model.engraving.dynamics === 'ff' ? 'selected' : ''}>ff</option>
-          </select>
-          <button type="button" id="apply-engraving">Apply Engraving</button>
+      <header class="top-shell">
+        <div class="command-region" aria-label="Top command region">
+          <button type="button">New</button><button type="button">Open</button><button type="button">Save</button>
+          <button type="button">Undo</button><button type="button">Redo</button>
+          <button type="button" data-hotkey="cmd+k">Command Palette <kbd>⌘K</kbd></button>
         </div>
+        <div class="project-meta">
+          <div>
+            <h1>${escapeHtml(model.title)}</h1>
+            <p class="subhead">${escapeHtml(model.projectLabel)}</p>
+            <p class="project-status">${escapeHtml(model.statusTone === 'dirty' ? 'Unsaved changes' : 'All changes saved')}</p>
+          </div>
+          <div class="mode-tabs" role="tablist" aria-label="Editor mode">
+            <button type="button" class="mode-tab ${activeMode === 'select' ? 'active' : ''}" data-hotkey="v">Select <kbd>V</kbd></button>
+            <button type="button" class="mode-tab ${activeMode === 'note-input' ? 'active' : ''}" data-hotkey="n">Note Input <kbd>N</kbd></button>
+            <button type="button" class="mode-tab ${activeMode === 'text-lines' ? 'active' : ''}" data-hotkey="t">Text & Symbols <kbd>T</kbd></button>
+          </div>
+        </div>
+        <div class="status-bar" aria-label="Status confidence strip">
+          <span class="status-chip playback-${playbackTone}">${escapeHtml(model.transportLabel)}</span>
+          <span class="status-chip project-${model.statusTone}">${escapeHtml(model.modeLabel)}</span>
+          <span class="status-chip">Autosave ${model.statusTone === 'dirty' ? 'pending' : 'synced'}</span>
+        </div>
+        <p class="subhead" aria-label="Keyboard shortcuts legend">Hotkeys: <kbd>Space</kbd> Play/Stop · <kbd>V</kbd> Select · <kbd>N</kbd> Note input · <kbd>T</kbd> Text & Symbols · <kbd>⌘K</kbd> Command palette</p>
       </header>
 
-      <div class="layout">
-        <section>
-          <h2>Live score metrics</h2>
-          ${renderStats(model.stats)}
+      <div class="workspace">
+        <aside class="panel left-rail">
+          <h2>Parts / staves</h2>
+          <ul>
+            <li><span>Piano RH</span><span>M/S</span></li>
+            <li><span>Piano LH</span><span>M/S</span></li>
+          </ul>
+          <section>
+            <h2>Live score metrics</h2>
+            ${renderStats(model.stats)}
+          </section>
+        </aside>
+
+        <section class="panel score-stage">
+          <h2>Score stage</h2>
+          <p class="subhead">Always-visible intent: duration ${intent.duration}, accidental ${intent.accidental}, dot ${intent.dot ? 'on' : 'off'}, tie ${intent.tie ? 'on' : 'off'}.</p>
+          <div class="entry-strip" aria-label="Step entry intent toolbar">
+            <span class="entry-chip active">Duration: ${intent.duration}</span>
+            <span class="entry-chip">Accidental: ${intent.accidental}</span>
+            <span class="entry-chip ${intent.dot ? 'active' : ''}">Dot</span>
+            <span class="entry-chip ${intent.tie ? 'active' : ''}">Tie</span>
+            <span class="entry-chip ${intent.chordMode ? 'active' : ''}">Chord mode</span>
+          </div>
+          <div class="command-region" aria-label="Score controls">
+            <button type="button" data-transport-action="toggle-playback">Play / Stop <kbd>Space</kbd></button>
+            <button type="button" data-transport-action="seek-start">Rewind</button>
+            <select id="note-step" aria-label="Note step"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option></select>
+            <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" />
+            <button type="button" id="insert-note">Insert Quarter Note</button>
+            <button type="button" id="add-measure">Add Measure</button>
+          </div>
+          ${renderScorePreview(model.scorePreview)}
         </section>
 
-        <section>
-          <h2>Session notifications</h2>
-          ${renderNotifications(model.notifications)}
-        </section>
-
-        ${renderScorePreview(model.scorePreview)}
+        <aside class="panel right-inspector">
+          <h2>Selection inspector (${densityPreset})</h2>
+          <div class="inspector-grid">
+            <label>Tempo <input id="tempo-bpm" type="number" min="20" max="320" value="${model.engraving.tempoBpm}" aria-label="Tempo BPM" /></label>
+            <label><input id="repeat-start" type="checkbox" ${model.engraving.repeatStart ? 'checked' : ''} /> Repeat start</label>
+            <label><input id="repeat-end" type="checkbox" ${model.engraving.repeatEnd ? 'checked' : ''} /> Repeat end</label>
+            <label>Dynamics
+              <select id="note-dynamics" aria-label="Note dynamics">
+                <option value="pp" ${model.engraving.dynamics === 'pp' ? 'selected' : ''}>pp</option>
+                <option value="p" ${model.engraving.dynamics === 'p' ? 'selected' : ''}>p</option>
+                <option value="mp" ${model.engraving.dynamics === 'mp' ? 'selected' : ''}>mp</option>
+                <option value="mf" ${model.engraving.dynamics === 'mf' ? 'selected' : ''}>mf</option>
+                <option value="f" ${model.engraving.dynamics === 'f' ? 'selected' : ''}>f</option>
+                <option value="ff" ${model.engraving.dynamics === 'ff' ? 'selected' : ''}>ff</option>
+              </select>
+            </label>
+            <button type="button" id="apply-engraving">Apply Engraving</button>
+          </div>
+          <div class="utility-flyout">
+            <h2>Utility flyout</h2>
+            <p class="subhead">Repeat/dynamics advanced editor appears here on demand.</p>
+          </div>
+          <section>
+            <h2>Session notifications</h2>
+            ${renderNotifications(model.notifications)}
+          </section>
+        </aside>
       </div>
+
+      <footer class="transport-strip" aria-label="Bottom transport strip">
+        <strong>Transport:</strong>
+        <span>${escapeHtml(model.transportLabel)}</span>
+        <span>Metronome: On</span>
+        <span>Loop: Off</span>
+        <span>Playback: ${playbackTone === 'active' ? 'Expressive' : 'Strict'}</span>
+      </footer>
     </main>
     <script>
       const postJson = async (path, body) => {
@@ -488,3 +411,4 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
     </script>
   </body>
 </html>`;
+};

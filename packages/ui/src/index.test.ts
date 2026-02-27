@@ -10,7 +10,7 @@ describe('@scorecraft/ui', () => {
     ]);
   });
 
-  it('renders polished html with escaped values and full score preview controls', () => {
+  it('renders escaped values and full shell regions for active playback', () => {
     const html = renderDesktopShellHtml({
       title: 'Suite <One>',
       modeLabel: 'note-input',
@@ -34,11 +34,22 @@ describe('@scorecraft/ui', () => {
         ],
       },
       engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, dynamics: 'mf' },
+      entryIntent: { duration: 'eighth', accidental: 'sharp', dot: true, tie: true, chordMode: true },
+      densityPreset: 'compact',
     });
 
     expect(html).toContain('<!doctype html>');
     expect(html).toContain('Suite &lt;One&gt;');
     expect(html).toContain('C#5 &amp; friends');
+    expect(html).toContain('Top command region');
+    expect(html).toContain('Bottom transport strip');
+    expect(html).toContain('Selection inspector (compact)');
+    expect(html).toContain('Always-visible intent: duration eighth, accidental sharp, dot on, tie on.');
+    expect(html).toContain('class="status-chip playback-active"');
+    expect(html).toContain('class="mode-tab active" data-hotkey="n"');
+    expect(html).toContain('Command Palette');
+    expect(html).toContain('<kbd>⌘K</kbd>');
+    expect(html).toContain('<kbd>Space</kbd>');
     expect(html).toContain('class="notification success"');
     expect(html).toContain('class="notification error"');
     expect(html).toContain('class="notification info"');
@@ -55,9 +66,10 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('data-measure="1"');
     expect(html).toContain('data-measure="2"');
     expect(html).toContain('measure selected');
+    expect(html).toContain('Playback: Expressive');
   });
 
-  it('renders empty states and no-measure score-preview fallback', () => {
+  it('renders empty states and falls back to default intent and default density', () => {
     const html = renderDesktopShellHtml({
       title: 'Empty',
       modeLabel: 'select',
@@ -74,8 +86,14 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('No notifications.');
     expect(html).toContain('All changes saved');
     expect(html).toContain('No measures available.');
+    expect(html).toContain('Selection inspector (default)');
+    expect(html).toContain('duration quarter, accidental natural, dot off, tie off');
     expect(html).toContain('value="112"');
     expect(html).toContain('id="repeat-start" type="checkbox" checked');
+    expect(html).toContain('class="status-chip playback-idle"');
+    expect(html).toContain('class="mode-tab active" data-hotkey="v"');
+    expect(html).toContain('Hotkeys: <kbd>Space</kbd> Play/Stop');
+    expect(html).toContain('Playback: Strict');
   });
 
   it('renders all measures across multiple systems for large scores', () => {
@@ -87,7 +105,7 @@ describe('@scorecraft/ui', () => {
 
     const html = renderDesktopShellHtml({
       title: 'Long Form',
-      modeLabel: 'select',
+      modeLabel: 'text-lines',
       transportLabel: 'Stopped @ tick 0',
       projectLabel: 'long.scorecraft.json',
       statusTone: 'stable',
@@ -95,10 +113,13 @@ describe('@scorecraft/ui', () => {
       notifications: [],
       scorePreview: { clef: 'treble', measures },
       engraving: { tempoBpm: 120, repeatStart: false, repeatEnd: false, dynamics: 'mf' },
+      densityPreset: 'default',
+      entryIntent: { duration: 'half', accidental: 'flat', dot: false, tie: false, chordMode: false },
     });
 
     expect(html.match(/data-measure="/g)?.length).toBe(20);
     expect(html).toContain('20 measures');
     expect(html).toContain('System 5 showing measures 17-20');
+    expect(html).toContain('class="mode-tab active" data-hotkey="t"');
   });
 });

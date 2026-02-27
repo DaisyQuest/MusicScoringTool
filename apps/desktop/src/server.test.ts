@@ -116,6 +116,117 @@ describe('desktop server', () => {
     expect(html).toContain('data-measure="2"');
   });
 
+
+
+
+
+  it('advances playback ticks over time while transport is playing', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const playResponse = await fetch(`${baseUrl}/api/transport`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle-playback' }),
+    });
+    expect(playResponse.status).toBe(200);
+
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    const firstHtml = await (await fetch(baseUrl)).text();
+    const firstTick = Number(/Playing @ tick (\d+)/.exec(firstHtml)?.[1] ?? '0');
+
+    await new Promise((resolve) => setTimeout(resolve, 140));
+    const secondHtml = await (await fetch(baseUrl)).text();
+    const secondTick = Number(/Playing @ tick (\d+)/.exec(secondHtml)?.[1] ?? '0');
+
+    expect(firstTick).toBeGreaterThan(0);
+    expect(secondTick).toBeGreaterThan(firstTick);
+
+    const stopResponse = await fetch(`${baseUrl}/api/transport`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle-playback' }),
+    });
+    expect(stopResponse.status).toBe(200);
+
+    const stoppedHtml = await (await fetch(baseUrl)).text();
+    expect(stoppedHtml).toContain('Stopped @ tick');
+  });
+
+  it('renders visible hotkeys and supports full control flow with seven note names across at least 20 measures', async () => {
+    const desktopServer = await startDesktopServer(0);
+    startedServers.push(desktopServer);
+
+    const address = desktopServer.server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP server address.');
+    }
+
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const postJson = async (path: string, payload: unknown): Promise<Response> =>
+      await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+    expect((await postJson('/api/hotkey', { hotkey: 'v' })).status).toBe(200);
+    expect((await postJson('/api/hotkey', { hotkey: 'n' })).status).toBe(200);
+    expect((await postJson('/api/hotkey', { hotkey: 't' })).status).toBe(200);
+    expect((await postJson('/api/hotkey', { hotkey: 'cmd+k' })).status).toBe(200);
+    expect((await postJson('/api/hotkey', { hotkey: 'n' })).status).toBe(200);
+
+    expect((await postJson('/api/transport', { action: 'toggle-playback' })).status).toBe(200);
+    expect((await postJson('/api/transport', { action: 'seek-start' })).status).toBe(200);
+
+    const noteSteps: Array<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'> = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+    expect((await postJson('/api/notes', { pitch: { step: noteSteps[0], octave: 4 }, duration: 'quarter', dots: 0 })).status).toBe(200);
+
+    for (let measure = 2; measure <= 20; measure += 1) {
+      expect((await postJson('/api/measures', {})).status).toBe(200);
+      const step = noteSteps[(measure - 1) % noteSteps.length] ?? 'C';
+      expect((await postJson('/api/notes', { pitch: { step, octave: 4 }, duration: 'quarter', dots: 0 })).status).toBe(200);
+    }
+
+    expect((await postJson('/api/engraving', { tempoBpm: 152, repeatStart: true, repeatEnd: true, dynamics: 'ff' })).status).toBe(200);
+
+    const html = await (await fetch(baseUrl)).text();
+
+    expect(html).toContain('aria-label="Top command region"');
+    expect(html).toContain('aria-label="Bottom transport strip"');
+    expect(html).toContain('aria-label="Keyboard shortcuts legend"');
+    expect(html).toContain('<kbd>Space</kbd>');
+    expect(html).toContain('<kbd>V</kbd>');
+    expect(html).toContain('<kbd>N</kbd>');
+    expect(html).toContain('<kbd>T</kbd>');
+    expect(html).toContain('<kbd>⌘K</kbd>');
+    expect(html).toContain('id="insert-note"');
+    expect(html).toContain('id="add-measure"');
+    expect(html).toContain('id="apply-engraving"');
+    expect(html).toContain('Selection inspector (default)');
+    expect(html).toContain('Repeat start');
+    expect(html).toContain('Repeat end');
+    expect(html).toContain('20 measures');
+    expect(html).toContain('System 5 showing measures 17-20');
+    expect(html).toContain('data-measure="20"');
+    expect(html).toContain('aria-label="A4"');
+    expect(html).toContain('aria-label="B4"');
+    expect(html).toContain('aria-label="C4"');
+    expect(html).toContain('aria-label="D4"');
+    expect(html).toContain('aria-label="E4"');
+    expect(html).toContain('aria-label="F4"');
+    expect(html).toContain('aria-label="G4"');
+    expect(html).toContain('Command palette opened.');
+    expect(html).toContain('152 bpm');
+  });
+
   it('rejects malformed API payloads', async () => {
     const desktopServer = await startDesktopServer(0);
     startedServers.push(desktopServer);
