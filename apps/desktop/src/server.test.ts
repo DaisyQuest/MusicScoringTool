@@ -64,14 +64,23 @@ describe('desktop server', () => {
     const noteResponse = await fetch(`${baseUrl}/api/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: 'quarter', dots: 0 }),
+      body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: '16th', dots: 0 }),
     });
     expect(noteResponse.status).toBe(200);
 
+    const fallbackDurationResponse = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { step: 'D', octave: 4 }, duration: '64th', dots: 0 }),
+    });
+    expect(fallbackDurationResponse.status).toBe(200);
+
     const html = await (await fetch(baseUrl)).text();
     expect(html).toContain('Events in focus voice');
-    expect(html).toContain('>1<');
+    expect(html).toContain('>2<');
     expect(html).toContain('Unsaved changes');
+    expect(html).toContain('Staff preview');
+    expect(html).toContain('aria-label="Staff preview with 2 notes"');
   });
 
   it('rejects malformed API payloads', async () => {

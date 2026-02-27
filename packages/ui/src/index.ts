@@ -23,6 +23,10 @@ export interface DesktopShellUiModel {
   statusTone: 'stable' | 'dirty';
   stats: UiStat[];
   notifications: UiNotification[];
+  staffPreview: {
+    measureLabel: string;
+    notes: string[];
+  };
 }
 
 export const defaultBindings: KeyboardCommandBinding[] = [
@@ -67,6 +71,35 @@ const renderNotifications = (notifications: UiNotification[]): string => {
   return `<ul class="notification-list">${notifications
     .map((notification) => `<li class="${notificationClass(notification.level)}">${escapeHtml(notification.message)}</li>`)
     .join('')}</ul>`;
+};
+
+const STEP_OFFSETS: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G', number> = { C: 6, D: 5, E: 4, F: 3, G: 2, A: 1, B: 0 };
+
+const noteToY = (note: string): number => {
+  const match = /^([A-G])([0-9])$/.exec(note);
+  if (!match) {
+    return 74;
+  }
+  const [, stepRaw, octaveRaw] = match;
+  const step = stepRaw as keyof typeof STEP_OFFSETS;
+  const octave = Number(octaveRaw);
+  const diatonic = octave * 7 + STEP_OFFSETS[step];
+  const e4 = 4 * 7 + STEP_OFFSETS.E;
+  return 74 - (diatonic - e4) * 6;
+};
+
+const renderStaffPreview = (measureLabel: string, notes: string[]): string => {
+  const safeMeasureLabel = escapeHtml(measureLabel);
+  const safeNotes = notes.map((note) => escapeHtml(note));
+  const notesMarkup = safeNotes
+    .map((note, index) => {
+      const x = 120 + index * 44;
+      const y = noteToY(note);
+      return `<g class="staff-note" aria-label="${note}"><ellipse cx="${x}" cy="${y}" rx="8" ry="6" /><line x1="${x + 8}" y1="${y}" x2="${x + 8}" y2="${y - 28}" /></g>`;
+    })
+    .join('');
+
+  return `<section><h2>Staff preview</h2><p class="subhead">${safeMeasureLabel}</p><svg viewBox="0 0 640 130" class="staff-preview" role="img" aria-label="Staff preview with ${safeNotes.length} note${safeNotes.length === 1 ? '' : 's'}"><g class="staff-lines"><line x1="24" y1="50" x2="616" y2="50" /><line x1="24" y1="62" x2="616" y2="62" /><line x1="24" y1="74" x2="616" y2="74" /><line x1="24" y1="86" x2="616" y2="86" /><line x1="24" y1="98" x2="616" y2="98" /></g><text x="36" y="84" class="clef">𝄞</text>${notesMarkup || '<text x="120" y="74" class="placeholder-note">Enter notes to see them on the staff.</text>'}</svg></section>`;
 };
 
 export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<!doctype html>
@@ -248,6 +281,33 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         border-color: rgb(251 113 133 / 35%);
       }
 
+      .staff-preview {
+        width: 100%;
+        margin-top: 0.8rem;
+        border-radius: 12px;
+        border: 1px solid #374167;
+        background: #171d35;
+      }
+
+      .staff-lines line,
+      .staff-note line {
+        stroke: #9ea8d6;
+        stroke-width: 1.6;
+      }
+
+      .staff-note ellipse {
+        fill: #f6f7ff;
+      }
+
+      .clef {
+        font-size: 45px;
+        fill: #d9def8;
+      }
+
+      .placeholder-note {
+        fill: var(--muted);
+      }
+
       .empty-state {
         margin: 0.9rem 0 0;
         color: var(--muted);
@@ -291,6 +351,8 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
           <h2>Session notifications</h2>
           ${renderNotifications(model.notifications)}
         </section>
+
+        ${renderStaffPreview(model.staffPreview.measureLabel, model.staffPreview.notes)}
       </div>
     </main>
     <script>
