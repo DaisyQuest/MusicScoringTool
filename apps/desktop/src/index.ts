@@ -1,4 +1,4 @@
-import { applyCommand, cloneScore, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef, type VoiceEvent } from '@scorecraft/core';
+import { applyCommand, cloneScore, createMeasure, createVoice, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef, type VoiceEvent } from '@scorecraft/core';
 import { exportMidi } from '@scorecraft/midi';
 import { renderDesktopShellHtml, type DesktopShellUiModel } from '@scorecraft/ui';
 
@@ -122,6 +122,39 @@ export const stepInsertNote = (
       eventIndex: state.caret.eventIndex + 1,
       ghostPitch: pitch,
     },
+  };
+};
+
+
+export const addMeasure = (state: DesktopShellState): DesktopShellState => {
+  const next = cloneScore(state.score);
+  const staff = next.parts[0]?.staves[0];
+  if (!staff) {
+    throw new Error('Score is missing a default staff.');
+  }
+
+  const nextMeasureNumber = (staff.measures.at(-1)?.number ?? 0) + 1;
+  const voiceCount = staff.measures[0]?.voices.length ?? 1;
+  const inserted = createMeasure(nextMeasureNumber);
+  inserted.voices = Array.from({ length: voiceCount }, () => createVoice());
+  staff.measures.push(inserted);
+
+  const part = next.parts[0]!;
+  const targetVoice = staff.measures.at(-1)!.voices[0]!;
+  return {
+    ...state,
+    score: next,
+    caret: {
+      ...state.caret,
+      selection: {
+        partId: part.id,
+        staffId: staff.id,
+        measureId: staff.measures.at(-1)!.id,
+        voiceId: targetVoice.id,
+      },
+      eventIndex: 0,
+    },
+    project: { ...state.project, dirty: true },
   };
 };
 
@@ -289,8 +322,9 @@ const eventToStaffNote = (event: VoiceEvent): string | undefined => {
 };
 
 export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()): string => {
-  const measure = state.score.parts[0]?.staves[0]?.measures[0];
-  const voice = measure?.voices[0];
+  const staff = state.score.parts[0]?.staves[0];
+  const measure = staff?.measures.find((item) => item.id === state.caret.selection.measureId) ?? staff?.measures[0];
+  const voice = measure?.voices.find((item) => item.id === state.caret.selection.voiceId) ?? measure?.voices[0];
 
   const model: DesktopShellUiModel = {
     title: state.score.title,
@@ -299,15 +333,33 @@ export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()
     projectLabel: state.project.path ?? 'Unsaved project',
     statusTone: state.project.dirty ? 'dirty' : 'stable',
     stats: [
-      { label: 'Measures', value: String(state.score.parts[0]?.staves[0]?.measures.length ?? 0) },
+      { label: 'Measures', value: String(staff?.measures.length ?? 0) },
       { label: 'Events in focus voice', value: String(voice?.events.length ?? 0) },
       { label: 'Tempo', value: `${measure?.tempoBpm ?? 120} bpm` },
       { label: 'Last action', value: state.transport.lastAction },
     ],
     notifications: notificationPreview(state),
-    staffPreview: {
-      measureLabel: `Measure ${measure?.number ?? 1} · ${state.score.parts[0]?.staves[0]?.clef ?? 'treble'} clef`,
-      notes: (voice?.events.map(eventToStaffNote).filter((note): note is string => note !== undefined) ?? []).slice(-10),
+    scorePreview: {
+      clef: staff?.clef ?? 'treble',
+      measures:
+        staff?.measures.map((item) => {
+          const previewVoice = item.voices.find((candidate) => candidate.id === state.caret.selection.voiceId) ?? item.voices[0];
+          const notes = (previewVoice?.events.map(eventToStaffNote).filter((note): note is string => note !== undefined) ?? []).slice(0, 8);
+          return {
+            number: item.number,
+            notes,
+            isSelected: item.id === state.caret.selection.measureId,
+          };
+        }) ?? [],
+    },
+    engraving: {
+      tempoBpm: measure?.tempoBpm ?? 120,
+      repeatStart: measure?.repeatStart ?? false,
+      repeatEnd: measure?.repeatEnd ?? false,
+      dynamics: (() => {
+        const latest = [...(voice?.events ?? [])].reverse().find((event) => event.type === 'note');
+        return latest && latest.type === 'note' && latest.dynamics ? latest.dynamics : 'mf';
+      })(),
     },
   };
 

@@ -54,6 +54,20 @@ describe('desktop server', () => {
 
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
+    const transportPlayResponse = await fetch(`${baseUrl}/api/transport`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle-playback' }),
+    });
+    expect(transportPlayResponse.status).toBe(200);
+
+    const transportSeekResponse = await fetch(`${baseUrl}/api/transport`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'seek-start' }),
+    });
+    expect(transportSeekResponse.status).toBe(200);
+
     const hotkeyResponse = await fetch(`${baseUrl}/api/hotkey`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -68,6 +82,23 @@ describe('desktop server', () => {
     });
     expect(noteResponse.status).toBe(200);
 
+    const engravingResponse = await fetch(`${baseUrl}/api/engraving`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tempoBpm: 136, repeatStart: true, repeatEnd: true, dynamics: 'ff' }),
+    });
+    expect(engravingResponse.status).toBe(200);
+
+    const engravedHtml = await (await fetch(baseUrl)).text();
+    expect(engravedHtml).toContain('136 bpm');
+
+    const addMeasureResponse = await fetch(`${baseUrl}/api/measures`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(addMeasureResponse.status).toBe(200);
+
     const fallbackDurationResponse = await fetch(`${baseUrl}/api/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -78,9 +109,11 @@ describe('desktop server', () => {
     const html = await (await fetch(baseUrl)).text();
     expect(html).toContain('Events in focus voice');
     expect(html).toContain('>2<');
+    expect(html).toContain('data-measure="2"');
     expect(html).toContain('Unsaved changes');
-    expect(html).toContain('Staff preview');
-    expect(html).toContain('aria-label="Staff preview with 2 notes"');
+    expect(html).toContain('Sheet music preview');
+    expect(html).toContain('data-measure="1"');
+    expect(html).toContain('data-measure="2"');
   });
 
   it('rejects malformed API payloads', async () => {
@@ -108,6 +141,27 @@ describe('desktop server', () => {
       body: '{',
     });
     expect(invalidJson.status).toBe(400);
+
+    const missingTransportAction = await fetch(`${baseUrl}/api/transport`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(missingTransportAction.status).toBe(400);
+
+    const invalidEngravingTempo = await fetch(`${baseUrl}/api/engraving`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tempoBpm: 'fast', dynamics: 'mf' }),
+    });
+    expect(invalidEngravingTempo.status).toBe(400);
+
+    const invalidEngravingDynamics = await fetch(`${baseUrl}/api/engraving`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tempoBpm: 120, dynamics: 'sfffz' }),
+    });
+    expect(invalidEngravingDynamics.status).toBe(400);
 
     const invalidNote = await fetch(`${baseUrl}/api/notes`, {
       method: 'POST',

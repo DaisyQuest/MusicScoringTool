@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   applyHotkey,
+  addMeasure,
   applyInspectorEdits,
   autosaveProject,
   createDesktopShell,
@@ -58,6 +59,20 @@ describe('desktop shell', () => {
 
     state = setGhostPreview(state);
     expect(state.caret.ghostPitch).toBeUndefined();
+  });
+
+
+
+  it('adds measures and moves caret to the new measure for continued entry', () => {
+    let state = createDesktopShell({ title: 'Measures' });
+    state = addMeasure(state);
+
+    const staff = state.score.parts[0]!.staves[0]!;
+    expect(staff.measures).toHaveLength(2);
+    expect(staff.measures[1]!.number).toBe(2);
+    expect(state.caret.selection.measureId).toBe(staff.measures[1]!.id);
+    expect(state.caret.eventIndex).toBe(0);
+    expect(state.project.dirty).toBe(true);
   });
 
   it('guards step entry outside note-input mode', () => {
@@ -201,6 +216,20 @@ describe('desktop shell', () => {
     await expect(saveProject(state, '/tmp/out.score', failing)).rejects.toThrow('permission denied');
   });
 
+
+
+  it('renders all measure blocks in boot html for long scores', () => {
+    let state = createDesktopShell({ title: 'Large Score' });
+    for (let i = 0; i < 19; i += 1) {
+      state = addMeasure(state);
+    }
+
+    const html = desktopShellBoot(state);
+    expect(html.match(/data-measure="/g)?.length).toBe(20);
+    expect(html).toContain('20 measures');
+    expect(html).toContain('System 5 showing measures 17-20');
+  });
+
   it('renders mode and notification slices in boot view', () => {
     let state = createDesktopShell({ title: 'Mode Matrix' });
     state = setMode(state, 'text-lines');
@@ -215,12 +244,15 @@ describe('desktop shell', () => {
       project: { ...state.project, path: '/tmp/demo.scorecraft.json', dirty: true },
     };
 
-    const html = desktopShellBoot(withNotifications);
+    const expanded = addMeasure(withNotifications);
+    const html = desktopShellBoot(expanded);
     expect(html).toContain('Text lines mode');
     expect(html).toContain('Playing @ tick 128');
     expect(html).toContain('/tmp/demo.scorecraft.json');
     expect(html).toContain('Unsaved changes');
     expect(html).toContain('Notice 6');
+    expect(html).toContain('id="add-measure"');
+    expect(html).toContain('id="apply-engraving"');
     expect(html).not.toContain('Notice 0');
   });
 });

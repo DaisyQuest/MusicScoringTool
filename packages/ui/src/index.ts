@@ -23,9 +23,19 @@ export interface DesktopShellUiModel {
   statusTone: 'stable' | 'dirty';
   stats: UiStat[];
   notifications: UiNotification[];
-  staffPreview: {
-    measureLabel: string;
-    notes: string[];
+  scorePreview: {
+    clef: string;
+    measures: Array<{
+      number: number;
+      notes: string[];
+      isSelected: boolean;
+    }>;
+  };
+  engraving: {
+    tempoBpm: number;
+    repeatStart: boolean;
+    repeatEnd: boolean;
+    dynamics: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
   };
 }
 
@@ -88,18 +98,41 @@ const noteToY = (note: string): number => {
   return 74 - (diatonic - e4) * 6;
 };
 
-const renderStaffPreview = (measureLabel: string, notes: string[]): string => {
-  const safeMeasureLabel = escapeHtml(measureLabel);
-  const safeNotes = notes.map((note) => escapeHtml(note));
+const renderMeasure = (
+  measure: DesktopShellUiModel['scorePreview']['measures'][number],
+  index: number,
+): string => {
+  const width = 228;
+  const xBase = 24 + (index % 4) * width;
+  const localIndex = index % 4;
+  const safeNotes = measure.notes.map((note) => escapeHtml(note));
   const notesMarkup = safeNotes
-    .map((note, index) => {
-      const x = 120 + index * 44;
+    .slice(0, 4)
+    .map((note, noteIndex) => {
+      const x = xBase + 64 + noteIndex * 34;
       const y = noteToY(note);
       return `<g class="staff-note" aria-label="${note}"><ellipse cx="${x}" cy="${y}" rx="8" ry="6" /><line x1="${x + 8}" y1="${y}" x2="${x + 8}" y2="${y - 28}" /></g>`;
     })
     .join('');
 
-  return `<section><h2>Staff preview</h2><p class="subhead">${safeMeasureLabel}</p><svg viewBox="0 0 640 130" class="staff-preview" role="img" aria-label="Staff preview with ${safeNotes.length} note${safeNotes.length === 1 ? '' : 's'}"><g class="staff-lines"><line x1="24" y1="50" x2="616" y2="50" /><line x1="24" y1="62" x2="616" y2="62" /><line x1="24" y1="74" x2="616" y2="74" /><line x1="24" y1="86" x2="616" y2="86" /><line x1="24" y1="98" x2="616" y2="98" /></g><text x="36" y="84" class="clef">𝄞</text>${notesMarkup || '<text x="120" y="74" class="placeholder-note">Enter notes to see them on the staff.</text>'}</svg></section>`;
+  return `<g class="measure${measure.isSelected ? ' selected' : ''}" data-measure="${measure.number}"><rect x="${xBase}" y="32" width="${width - 10}" height="84" rx="10" class="measure-bg" /><line x1="${xBase}" y1="50" x2="${xBase + width - 10}" y2="50" /><line x1="${xBase}" y1="62" x2="${xBase + width - 10}" y2="62" /><line x1="${xBase}" y1="74" x2="${xBase + width - 10}" y2="74" /><line x1="${xBase}" y1="86" x2="${xBase + width - 10}" y2="86" /><line x1="${xBase}" y1="98" x2="${xBase + width - 10}" y2="98" />${localIndex === 0 ? '<text x="32" y="84" class="clef">𝄞</text>' : ''}<text x="${xBase + 12}" y="45" class="measure-label">M${measure.number}</text>${notesMarkup || `<text x="${xBase + 64}" y="74" class="placeholder-note">Rest</text>`}</g>`;
+};
+
+const renderScorePreview = (preview: DesktopShellUiModel['scorePreview']): string => {
+  const safeClef = escapeHtml(preview.clef);
+  if (!preview.measures.length) {
+    return '<section><h2>Sheet music preview</h2><p class="empty-state">No measures available.</p></section>';
+  }
+
+  const systems = Array.from({ length: Math.ceil(preview.measures.length / 4) }, (_, systemIndex) => {
+    const start = systemIndex * 4;
+    const end = start + 4;
+    const measures = preview.measures.slice(start, end);
+    const systemMarkup = measures.map((measure, measureOffset) => renderMeasure(measure, measureOffset)).join('');
+    return `<svg viewBox="0 0 940 140" class="staff-preview" role="img" aria-label="System ${systemIndex + 1} showing measures ${measures[0]!.number}-${measures.at(-1)!.number}"><g class="staff-lines">${systemMarkup}</g></svg>`;
+  });
+
+  return `<section><h2>Sheet music preview</h2><p class="subhead">${safeClef} clef · ${preview.measures.length} measure${preview.measures.length === 1 ? '' : 's'}</p><div class="score-preview-grid">${systems.join('')}</div></section>`;
 };
 
 export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<!doctype html>
@@ -135,7 +168,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
       }
 
       main {
-        width: min(980px, 100%);
+        width: min(1160px, 100%);
         background: color-mix(in oklab, var(--panel), black 20%);
         border: 1px solid #2f3452;
         border-radius: 20px;
@@ -169,7 +202,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
 
       .layout {
         display: grid;
-        grid-template-columns: 1.45fr 1fr;
+        grid-template-columns: 1fr;
         gap: 1rem;
         padding: 1.3rem;
       }
@@ -281,9 +314,14 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         border-color: rgb(251 113 133 / 35%);
       }
 
+      .score-preview-grid {
+        display: grid;
+        gap: 0.8rem;
+        margin-top: 0.85rem;
+      }
+
       .staff-preview {
         width: 100%;
-        margin-top: 0.8rem;
         border-radius: 12px;
         border: 1px solid #374167;
         background: #171d35;
@@ -295,6 +333,17 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         stroke-width: 1.6;
       }
 
+      .measure-bg {
+        fill: rgb(15 20 35 / 50%);
+        stroke: #35406a;
+        stroke-width: 1;
+      }
+
+      .measure.selected .measure-bg {
+        stroke: var(--accent);
+        stroke-width: 2;
+      }
+
       .staff-note ellipse {
         fill: #f6f7ff;
       }
@@ -302,6 +351,11 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
       .clef {
         font-size: 45px;
         fill: #d9def8;
+      }
+
+      .measure-label {
+        fill: var(--muted);
+        font-size: 11px;
       }
 
       .placeholder-note {
@@ -313,12 +367,6 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         color: var(--muted);
         font-style: italic;
       }
-
-      @media (max-width: 840px) {
-        .layout {
-          grid-template-columns: 1fr;
-        }
-      }
     </style>
   </head>
   <body>
@@ -329,7 +377,8 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         <p class="subhead">${escapeHtml(model.transportLabel)} · ${escapeHtml(model.projectLabel)}</p>
         <p class="project-status">${escapeHtml(model.statusTone === 'dirty' ? 'Unsaved changes' : 'All changes saved')}</p>
         <div class="controls" aria-label="Score controls">
-          <button type="button" data-hotkey="space">Play / Stop</button>
+          <button type="button" data-transport-action="toggle-playback">Play / Stop</button>
+          <button type="button" data-transport-action="seek-start">Rewind</button>
           <button type="button" data-hotkey="v">Select</button>
           <button type="button" data-hotkey="n">Note Input</button>
           <button type="button" data-hotkey="t">Text Lines</button>
@@ -338,6 +387,19 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
           </select>
           <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" />
           <button type="button" id="insert-note">Insert Quarter Note</button>
+          <button type="button" id="add-measure">Add Measure</button>
+          <input id="tempo-bpm" type="number" min="20" max="320" value="${model.engraving.tempoBpm}" aria-label="Tempo BPM" />
+          <label><input id="repeat-start" type="checkbox" ${model.engraving.repeatStart ? 'checked' : ''} /> Repeat start</label>
+          <label><input id="repeat-end" type="checkbox" ${model.engraving.repeatEnd ? 'checked' : ''} /> Repeat end</label>
+          <select id="note-dynamics" aria-label="Note dynamics">
+            <option value="pp" ${model.engraving.dynamics === 'pp' ? 'selected' : ''}>pp</option>
+            <option value="p" ${model.engraving.dynamics === 'p' ? 'selected' : ''}>p</option>
+            <option value="mp" ${model.engraving.dynamics === 'mp' ? 'selected' : ''}>mp</option>
+            <option value="mf" ${model.engraving.dynamics === 'mf' ? 'selected' : ''}>mf</option>
+            <option value="f" ${model.engraving.dynamics === 'f' ? 'selected' : ''}>f</option>
+            <option value="ff" ${model.engraving.dynamics === 'ff' ? 'selected' : ''}>ff</option>
+          </select>
+          <button type="button" id="apply-engraving">Apply Engraving</button>
         </div>
       </header>
 
@@ -352,7 +414,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
           ${renderNotifications(model.notifications)}
         </section>
 
-        ${renderStaffPreview(model.staffPreview.measureLabel, model.staffPreview.notes)}
+        ${renderScorePreview(model.scorePreview)}
       </div>
     </main>
     <script>
@@ -379,11 +441,45 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => `<
         });
       }
 
+      for (const button of document.querySelectorAll('[data-transport-action]')) {
+        button.addEventListener('click', async () => {
+          try {
+            await postJson('/api/transport', { action: button.dataset.transportAction });
+            location.reload();
+          } catch (error) {
+            alert(error instanceof Error ? error.message : String(error));
+          }
+        });
+      }
+
       document.getElementById('insert-note')?.addEventListener('click', async () => {
         const step = document.getElementById('note-step')?.value;
         const octave = Number(document.getElementById('note-octave')?.value);
         try {
           await postJson('/api/notes', { pitch: { step, octave }, duration: 'quarter', dots: 0 });
+          location.reload();
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('add-measure')?.addEventListener('click', async () => {
+        try {
+          await postJson('/api/measures', {});
+          location.reload();
+        } catch (error) {
+          alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+      document.getElementById('apply-engraving')?.addEventListener('click', async () => {
+        const tempoBpm = Number(document.getElementById('tempo-bpm')?.value);
+        const repeatStart = Boolean(document.getElementById('repeat-start')?.checked);
+        const repeatEnd = Boolean(document.getElementById('repeat-end')?.checked);
+        const dynamics = document.getElementById('note-dynamics')?.value;
+
+        try {
+          await postJson('/api/engraving', { tempoBpm, repeatStart, repeatEnd, dynamics });
           location.reload();
         } catch (error) {
           alert(error instanceof Error ? error.message : String(error));
