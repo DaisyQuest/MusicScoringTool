@@ -1,4 +1,6 @@
 import { createServer, type Server } from 'node:http';
+import { normalize, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { desktopShellBoot } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
@@ -33,15 +35,15 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
 
 export const startDesktopServer = async (port?: number): Promise<DesktopServer> => {
   const desktopServer = createDesktopServer(port);
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolveStart, rejectStart) => {
     const onError = (error: Error): void => {
       desktopServer.server.off('listening', onListening);
-      reject(error);
+      rejectStart(error);
     };
 
     const onListening = (): void => {
       desktopServer.server.off('error', onError);
-      resolve();
+      resolveStart();
     };
 
     desktopServer.server.once('error', onError);
@@ -51,7 +53,31 @@ export const startDesktopServer = async (port?: number): Promise<DesktopServer> 
   return desktopServer;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const toComparableEntrypointPath = (entryPath: string): string => {
+  if (/^[a-zA-Z]:[\\/]/.test(entryPath)) {
+    return entryPath;
+  }
+  return resolve(entryPath);
+};
+
+const normalizeEntrypointPath = (entryPath: string): string => {
+  const slashNormalized = normalize(entryPath).replaceAll('\\', '/');
+  const withoutDrivePrefixSlash = slashNormalized.replace(/^\/([a-zA-Z]:)/, '$1');
+  return withoutDrivePrefixSlash.replace(/^([a-zA-Z]:)/, (_, driveLetter: string) => driveLetter.toLowerCase());
+};
+
+export const isServerEntrypointInvocation = (moduleUrl: string, argvPath: string | undefined): boolean => {
+  if (!argvPath) {
+    return false;
+  }
+
+  return (
+    normalizeEntrypointPath(toComparableEntrypointPath(fileURLToPath(moduleUrl))) ===
+    normalizeEntrypointPath(toComparableEntrypointPath(argvPath))
+  );
+};
+
+if (isServerEntrypointInvocation(import.meta.url, process.argv[1])) {
   const desktopServer = await startDesktopServer();
   process.stdout.write(`Scorecraft server listening on http://localhost:${desktopServer.port}\n`);
 }

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDesktopServer, resolveDesktopPort, startDesktopServer } from './server.js';
+import {
+  createDesktopServer,
+  isServerEntrypointInvocation,
+  resolveDesktopPort,
+  startDesktopServer,
+} from './server.js';
 
 const closeServer = async (desktopServer: { server: { close: (cb: (error?: Error) => void) => void } }): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
@@ -79,5 +84,19 @@ describe('desktop server', () => {
     expect(() => resolveDesktopPort('1.2')).toThrow(/Invalid PORT value/);
     expect(() => resolveDesktopPort('-1')).toThrow(/Invalid PORT value/);
     expect(() => resolveDesktopPort('65536')).toThrow(/Invalid PORT value/);
+  });
+
+  it('identifies when the server module is launched as the process entrypoint', () => {
+    expect(isServerEntrypointInvocation('file:///workspace/MusicScoringTool/apps/desktop/src/server.ts', '/workspace/MusicScoringTool/apps/desktop/src/server.ts')).toBe(true);
+  });
+
+  it('returns false for non-entrypoint invocation and missing argv path', () => {
+    expect(isServerEntrypointInvocation('file:///workspace/MusicScoringTool/apps/desktop/src/server.ts', '/workspace/MusicScoringTool/apps/desktop/src/other.ts')).toBe(false);
+    expect(isServerEntrypointInvocation('file:///workspace/MusicScoringTool/apps/desktop/src/server.ts', undefined)).toBe(false);
+  });
+
+  it('supports Windows-style argv paths when determining entrypoint invocation', () => {
+    expect(isServerEntrypointInvocation('file:///C:/MusicScoringTool/apps/desktop/dist/server.js', 'C:\\MusicScoringTool\\apps\\desktop\\dist\\server.js')).toBe(true);
+    expect(isServerEntrypointInvocation('file:///C:/MusicScoringTool/apps/desktop/dist/server.js', 'C:\\MusicScoringTool\\apps\\desktop\\dist\\index.js')).toBe(false);
   });
 });
