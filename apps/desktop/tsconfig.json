@@ -5,5 +5,8 @@
     "outDir": "dist"
   },
   "include": ["src/**/*.ts"],
-  "references": []
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/midi" }
+  ]
 }

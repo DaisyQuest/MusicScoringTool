@@ -1,1 +1,269 @@
-export const desktopShellBoot = () => 'scorecraft-desktop-shell-ready';
+import { applyCommand, cloneScore, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef } from '@scorecraft/core';
+import { exportMidi } from '@scorecraft/midi';
+
+export type DesktopMode = 'select' | 'note-input' | 'text-lines';
+export type NotificationLevel = 'success' | 'error' | 'info';
+
+export interface Notification {
+  id: string;
+  level: NotificationLevel;
+  message: string;
+}
+
+export interface TransportState {
+  isPlaying: boolean;
+  tick: number;
+  lastAction: 'play' | 'stop' | 'seek';
+}
+
+export interface DesktopProject {
+  path?: string;
+  dirty: boolean;
+  lastSavedAt?: string;
+  recoverySnapshot?: string;
+}
+
+export interface StepEntryCaret {
+  selection: SelectionRef;
+  eventIndex: number;
+  ghostPitch?: Pitch;
+}
+
+export interface DesktopShellState {
+  score: Score;
+  mode: DesktopMode;
+  caret: StepEntryCaret;
+  transport: TransportState;
+  project: DesktopProject;
+  notifications: Notification[];
+}
+
+export interface NewScoreWizardInput {
+  title: string;
+  partName?: string;
+}
+
+export interface HotkeyAction {
+  id: 'toggle-playback' | 'set-select-mode' | 'set-note-mode' | 'set-text-lines-mode' | 'open-command-palette';
+  description: string;
+}
+
+let notificationId = 1;
+const nextNotificationId = (): string => `notification_${notificationId++}`;
+
+const defaultSelection = (score: Score): SelectionRef => {
+  const part = score.parts[0];
+  const staff = part?.staves[0];
+  const measure = staff?.measures[0];
+  const voice = measure?.voices[0];
+  if (!part || !staff || !measure || !voice) {
+    throw new Error('Score is missing default voice structure.');
+  }
+  return { partId: part.id, staffId: staff.id, measureId: measure.id, voiceId: voice.id };
+};
+
+const pushNotification = (state: DesktopShellState, level: NotificationLevel, message: string): DesktopShellState => ({
+  ...state,
+  notifications: [...state.notifications, { id: nextNotificationId(), level, message }],
+});
+
+export const createDesktopShell = (wizardInput: Partial<NewScoreWizardInput> = {}): DesktopShellState => {
+  const score = createScore(wizardInput.title?.trim() || 'Untitled');
+  if (wizardInput.partName?.trim()) {
+    score.parts[0]!.name = wizardInput.partName.trim();
+  }
+
+  return {
+    score,
+    mode: 'select',
+    caret: { selection: defaultSelection(score), eventIndex: 0 },
+    transport: { isPlaying: false, tick: 0, lastAction: 'stop' },
+    project: { dirty: false },
+    notifications: [],
+  };
+};
+
+export const runNewScoreWizard = (state: DesktopShellState, input: NewScoreWizardInput): DesktopShellState => {
+  const next = createDesktopShell(input);
+  return pushNotification(next, 'success', `Created score "${next.score.title}".`);
+};
+
+export const setMode = (state: DesktopShellState, mode: DesktopMode): DesktopShellState => ({ ...state, mode });
+
+export const setGhostPreview = (state: DesktopShellState, pitch?: Pitch): DesktopShellState => ({
+  ...state,
+  caret: pitch ? { ...state.caret, ghostPitch: pitch } : { selection: state.caret.selection, eventIndex: state.caret.eventIndex },
+});
+
+export const stepInsertNote = (
+  state: DesktopShellState,
+  pitch: Pitch,
+  duration: Duration = 'quarter',
+  dots: 0 | 1 | 2 = 0,
+): DesktopShellState => {
+  if (state.mode !== 'note-input') {
+    throw new Error('Step entry requires note-input mode.');
+  }
+  const result = applyCommand(state.score, {
+    type: 'insertNote',
+    selection: state.caret.selection,
+    pitch,
+    duration,
+    dots,
+  });
+
+  return {
+    ...state,
+    score: result.score,
+    project: { ...state.project, dirty: true },
+    caret: {
+      ...state.caret,
+      eventIndex: state.caret.eventIndex + 1,
+      ghostPitch: pitch,
+    },
+  };
+};
+
+export const applyInspectorEdits = (
+  state: DesktopShellState,
+  edits: Partial<{
+    tempoBpm: number;
+    repeatStart: boolean;
+    repeatEnd: boolean;
+    dynamics: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
+  }>,
+): DesktopShellState => {
+  let next = cloneScore(state.score);
+  const selection = state.caret.selection;
+  const part = next.parts.find((item) => item.id === selection.partId);
+  const staff = part?.staves.find((item) => item.id === selection.staffId);
+  const measure = staff?.measures.find((item) => item.id === selection.measureId);
+  const voice = measure?.voices.find((item) => item.id === selection.voiceId);
+  if (!measure || !voice) {
+    throw new Error('Inspector selection is invalid.');
+  }
+
+  let dirty = false;
+  if (typeof edits.tempoBpm === 'number') {
+    measure.tempoBpm = edits.tempoBpm;
+    dirty = true;
+  }
+  if (typeof edits.repeatStart === 'boolean') {
+    measure.repeatStart = edits.repeatStart;
+    dirty = true;
+  }
+  if (typeof edits.repeatEnd === 'boolean') {
+    measure.repeatEnd = edits.repeatEnd;
+    dirty = true;
+  }
+  if (edits.dynamics) {
+    const event = voice.events[state.caret.eventIndex - 1];
+    if (event?.type === 'note') {
+      event.dynamics = edits.dynamics;
+      dirty = true;
+    }
+  }
+
+  return {
+    ...state,
+    score: next,
+    project: { ...state.project, dirty: state.project.dirty || dirty },
+  };
+};
+
+export const updateTransport = (state: DesktopShellState, update: Partial<Pick<TransportState, 'isPlaying' | 'tick'>>): DesktopShellState => {
+  const isPlaying = update.isPlaying ?? state.transport.isPlaying;
+  const tick = update.tick ?? state.transport.tick;
+  const lastAction: TransportState['lastAction'] =
+    update.tick !== undefined ? 'seek' : isPlaying ? 'play' : 'stop';
+  return { ...state, transport: { isPlaying, tick, lastAction } };
+};
+
+export const resolveCommandPalette = (query: string): HotkeyAction[] => {
+  const actions: HotkeyAction[] = [
+    { id: 'toggle-playback', description: 'Play or stop transport' },
+    { id: 'set-select-mode', description: 'Switch to select mode' },
+    { id: 'set-note-mode', description: 'Switch to note input mode' },
+    { id: 'set-text-lines-mode', description: 'Switch to text-lines mode' },
+    { id: 'open-command-palette', description: 'Open command palette' },
+  ];
+
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return actions;
+  return actions.filter((action) => action.id.includes(normalized) || action.description.toLowerCase().includes(normalized));
+};
+
+export const applyHotkey = (state: DesktopShellState, hotkey: 'space' | 'v' | 'n' | 't' | 'cmd+k'): DesktopShellState => {
+  switch (hotkey) {
+    case 'space':
+      return updateTransport(state, { isPlaying: !state.transport.isPlaying });
+    case 'v':
+      return setMode(state, 'select');
+    case 'n':
+      return setMode(state, 'note-input');
+    case 't':
+      return setMode(state, 'text-lines');
+    case 'cmd+k':
+      return pushNotification(state, 'info', 'Command palette opened.');
+    default:
+      return state;
+  }
+};
+
+export const saveProject = async (
+  state: DesktopShellState,
+  path: string,
+  writeFile: (path: string, data: string) => Promise<void>,
+): Promise<DesktopShellState> => {
+  await writeFile(path, serializeScore(state.score));
+  const project: DesktopProject = {
+    path,
+    dirty: false,
+    lastSavedAt: new Date().toISOString(),
+    ...(state.project.recoverySnapshot ? { recoverySnapshot: state.project.recoverySnapshot } : {}),
+  };
+
+  return {
+    ...state,
+    project,
+  };
+};
+
+export const autosaveProject = async (
+  state: DesktopShellState,
+  writeFile: (path: string, data: string) => Promise<void>,
+): Promise<DesktopShellState> => {
+  const path = state.project.path ?? `${state.score.id}.autosave.scorecraft.json`;
+  const snapshot = serializeScore(state.score);
+  await writeFile(path, snapshot);
+  return {
+    ...state,
+    project: { ...state.project, recoverySnapshot: snapshot },
+  };
+};
+
+export const recoverFromAutosave = (snapshot: string): DesktopShellState => {
+  const score = deserializeScore(snapshot);
+  const shell = createDesktopShell({ title: score.title });
+  shell.score = score;
+  shell.caret = { ...shell.caret, selection: defaultSelection(score) };
+  shell.project.recoverySnapshot = snapshot;
+  return pushNotification(shell, 'info', 'Recovered project from autosave snapshot.');
+};
+
+export const exportMidiWithNotifications = async (
+  state: DesktopShellState,
+  targetPath: string,
+  writeFile: (path: string, data: Uint8Array) => Promise<void>,
+): Promise<DesktopShellState> => {
+  try {
+    const rendered = exportMidi(state.score);
+    await writeFile(targetPath, rendered.bytes);
+    return pushNotification(state, 'success', `Exported MIDI (${rendered.bytes.byteLength} bytes) to ${targetPath}.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown export error.';
+    return pushNotification(state, 'error', `MIDI export failed: ${message}`);
+  }
+};
+
+export const desktopShellBoot = (): string => 'scorecraft-desktop-shell-ready';
