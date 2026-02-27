@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   applyHotkey,
   addMeasure,
+  advancePlayback,
   applyInspectorEdits,
   autosaveProject,
   createDesktopShell,
@@ -100,15 +101,56 @@ describe('desktop shell', () => {
 
   it('updates transport state for play/stop/seek actions', () => {
     let state = createDesktopShell();
-    state = updateTransport(state, { isPlaying: true });
+    state = updateTransport(state, { isPlaying: true, nowMs: 10 });
     expect(state.transport.lastAction).toBe('play');
+    expect(state.transport.lastUpdatedAtMs).toBe(10);
 
-    state = updateTransport(state, { isPlaying: false });
+    state = updateTransport(state, { isPlaying: false, nowMs: 20 });
     expect(state.transport.lastAction).toBe('stop');
+    expect(state.transport.lastUpdatedAtMs).toBeUndefined();
 
-    state = updateTransport(state, { tick: 960 });
+    state = updateTransport(state, { tick: 960, nowMs: 30 });
     expect(state.transport.lastAction).toBe('seek');
     expect(state.transport.tick).toBe(960);
+    expect(state.transport.tickRemainder).toBe(0);
+
+    state = updateTransport(state, { isPlaying: true, tick: 100, nowMs: 40 });
+    expect(state.transport.lastAction).toBe('seek');
+    expect(state.transport.lastUpdatedAtMs).toBe(40);
+  });
+
+
+
+  it('advances playback ticks using elapsed wall time and tempo, preserving fractional remainders', () => {
+    let state = createDesktopShell({ title: 'Playback Math' });
+    state = setMode(state, 'note-input');
+    state = stepInsertNote(state, { step: 'C', octave: 4 }, 'quarter', 0);
+    state = applyInspectorEdits(state, { tempoBpm: 120 });
+
+    state = updateTransport(state, { isPlaying: true, nowMs: 1_000 });
+    const advanced = advancePlayback(state, 1_125);
+
+    expect(advanced.transport.tick).toBe(120);
+    expect(advanced.transport.lastUpdatedAtMs).toBe(1_125);
+    expect(advanced.transport.tickRemainder).toBeCloseTo(0, 6);
+
+    const smallSlice = advancePlayback(advanced, 1_126);
+    expect(smallSlice.transport.tick).toBe(120);
+    expect(smallSlice.transport.tickRemainder).toBeGreaterThan(0);
+  });
+
+  it('does not advance when transport is stopped and seeds playback timestamp when undefined', () => {
+    const idle = createDesktopShell();
+    expect(advancePlayback(idle, 2_000)).toBe(idle);
+
+    const playingWithoutTimestamp = {
+      ...idle,
+      transport: { ...idle.transport, isPlaying: true, lastAction: 'play', tickRemainder: undefined, lastUpdatedAtMs: undefined },
+    };
+    const initialized = advancePlayback(playingWithoutTimestamp, 2_500);
+    expect(initialized.transport.tick).toBe(0);
+    expect(initialized.transport.lastUpdatedAtMs).toBe(2_500);
+    expect(initialized.transport.tickRemainder).toBe(0);
   });
 
   it('command palette filters actions by id and description', () => {

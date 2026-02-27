@@ -15,6 +15,8 @@ export interface TransportState {
   isPlaying: boolean;
   tick: number;
   lastAction: 'play' | 'stop' | 'seek';
+  lastUpdatedAtMs?: number;
+  tickRemainder?: number;
 }
 
 export interface DesktopProject {
@@ -78,7 +80,7 @@ export const createDesktopShell = (wizardInput: Partial<NewScoreWizardInput> = {
     score,
     mode: 'select',
     caret: { selection: defaultSelection(score), eventIndex: 0 },
-    transport: { isPlaying: false, tick: 0, lastAction: 'stop' },
+    transport: { isPlaying: false, tick: 0, lastAction: 'stop', tickRemainder: 0 },
     project: { dirty: false },
     notifications: [],
   };
@@ -205,12 +207,91 @@ export const applyInspectorEdits = (
   };
 };
 
-export const updateTransport = (state: DesktopShellState, update: Partial<Pick<TransportState, 'isPlaying' | 'tick'>>): DesktopShellState => {
+const resolveActiveTempo = (state: DesktopShellState): number => {
+  const selection = state.caret.selection;
+  const part = state.score.parts.find((item) => item.id === selection.partId);
+  const staff = part?.staves.find((item) => item.id === selection.staffId);
+  const measure = staff?.measures.find((item) => item.id === selection.measureId);
+  const tempo = measure?.tempoBpm ?? staff?.measures[0]?.tempoBpm ?? 120;
+  return tempo > 0 ? tempo : 120;
+};
+
+export const advancePlayback = (state: DesktopShellState, nowMs: number = Date.now()): DesktopShellState => {
+  if (!state.transport.isPlaying) {
+    return state;
+  }
+
+  const lastUpdatedAtMs = state.transport.lastUpdatedAtMs ?? nowMs;
+  const elapsedMs = Math.max(0, nowMs - lastUpdatedAtMs);
+  if (elapsedMs === 0) {
+    return state.transport.lastUpdatedAtMs === undefined
+      ? { ...state, transport: { ...state.transport, lastUpdatedAtMs: nowMs, tickRemainder: state.transport.tickRemainder ?? 0 } }
+      : state;
+  }
+
+  const ticksPerMs = (resolveActiveTempo(state) * 480) / 60_000;
+  const preciseDelta = elapsedMs * ticksPerMs + (state.transport.tickRemainder ?? 0);
+  const deltaTick = Math.floor(preciseDelta);
+
+  return {
+    ...state,
+    transport: {
+      ...state.transport,
+      tick: state.transport.tick + deltaTick,
+      tickRemainder: preciseDelta - deltaTick,
+      lastUpdatedAtMs: nowMs,
+    },
+  };
+};
+
+export const updateTransport = (
+  state: DesktopShellState,
+  update: Partial<Pick<TransportState, 'isPlaying' | 'tick'>> & { nowMs?: number },
+): DesktopShellState => {
+  const nowMs = update.nowMs ?? Date.now();
   const isPlaying = update.isPlaying ?? state.transport.isPlaying;
   const tick = update.tick ?? state.transport.tick;
-  const lastAction: TransportState['lastAction'] =
-    update.tick !== undefined ? 'seek' : isPlaying ? 'play' : 'stop';
-  return { ...state, transport: { isPlaying, tick, lastAction } };
+
+  if (update.tick !== undefined) {
+    return {
+      ...state,
+      transport: {
+        ...state.transport,
+        isPlaying,
+        tick,
+        tickRemainder: 0,
+        lastUpdatedAtMs: isPlaying ? nowMs : undefined,
+        lastAction: 'seek',
+      },
+    };
+  }
+
+  if (update.isPlaying !== undefined && update.isPlaying !== state.transport.isPlaying) {
+    return {
+      ...state,
+      transport: {
+        ...state.transport,
+        isPlaying,
+        tick,
+        tickRemainder: isPlaying ? state.transport.tickRemainder ?? 0 : 0,
+        lastUpdatedAtMs: isPlaying ? nowMs : undefined,
+        lastAction: isPlaying ? 'play' : 'stop',
+      },
+    };
+  }
+
+  const fallbackAction: TransportState['lastAction'] = isPlaying ? 'play' : 'stop';
+  return {
+    ...state,
+    transport: {
+      ...state.transport,
+      isPlaying,
+      tick,
+      lastAction: fallbackAction,
+      lastUpdatedAtMs: isPlaying ? state.transport.lastUpdatedAtMs ?? nowMs : undefined,
+      tickRemainder: isPlaying ? state.transport.tickRemainder ?? 0 : 0,
+    },
+  };
 };
 
 export const resolveCommandPalette = (query: string): HotkeyAction[] => {
@@ -361,6 +442,14 @@ export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()
         return latest && latest.type === 'note' && latest.dynamics ? latest.dynamics : 'mf';
       })(),
     },
+    entryIntent: {
+      duration: 'quarter',
+      accidental: 'natural',
+      dot: false,
+      tie: false,
+      chordMode: false,
+    },
+    densityPreset: 'default',
   };
 
   return renderDesktopShellHtml(model);

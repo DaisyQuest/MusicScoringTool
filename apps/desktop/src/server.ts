@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { addMeasure, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
+import { addMeasure, advancePlayback, applyHotkey, applyInspectorEdits, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, updateTransport, type DesktopShellState } from './index.js';
 
 const DEFAULT_DESKTOP_PORT = 4173;
 
@@ -62,6 +62,7 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
   let shellState: DesktopShellState = createDesktopShell();
 
   const server = createServer(async (request, response) => {
+    shellState = advancePlayback(shellState);
 
     if (request.method === 'POST' && request.url === '/api/transport') {
       try {
