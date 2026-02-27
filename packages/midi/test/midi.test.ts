@@ -157,6 +157,46 @@ describe('midi export', () => {
     expect(sameTickStatuses[2] & 0xf0).toBe(0x90);
   });
 
+
+  it('exports thirty-second and sixty-fourth durations with expected tick spacing', () => {
+    const score = createScore('Subdivisions');
+    const voice = score.parts[0].staves[0].measures[0].voices[0];
+    voice.events.push(
+      { id: 'n32', type: 'note', duration: 'thirtySecond', dots: 0, pitch: { step: 'C', octave: 4 }, articulations: [] },
+      { id: 'n64', type: 'note', duration: 'sixtyFourth', dots: 0, pitch: { step: 'D', octave: 4 }, articulations: [] },
+    );
+
+    const noteOns = channelEvents(0x90, parseMidi(exportMidi(score).bytes).tracks[1]);
+    expect(noteOns.map((event) => event.absoluteTick)).toEqual([0, 60]);
+  });
+
+  it('derives timeline from all staves instead of only the first staff', () => {
+    const score = createScore('CrossStaff');
+    score.parts[0].staves[0].measures[0].voices[0].events = [];
+    score.parts[0].staves[0].measures.push({
+      id: 'm2-upper',
+      number: 2,
+      voices: [{ id: 'v2-upper', events: [{ id: 'u2', type: 'note', duration: 'quarter', dots: 0, pitch: { step: 'E', octave: 4 }, articulations: [] }] }],
+      chordSymbols: [],
+    });
+
+    score.parts[0].staves.push({
+      id: 'lower',
+      clef: 'bass',
+      measures: [
+        {
+          id: 'm1-lower',
+          number: 1,
+          voices: [{ id: 'v1-lower', events: [{ id: 'l1', type: 'note', duration: 'whole', dots: 0, pitch: { step: 'C', octave: 3 }, articulations: [] }] }],
+          chordSymbols: [],
+        },
+      ],
+    });
+
+    const noteOns = channelEvents(0x90, parseMidi(exportMidi(score).bytes).tracks[1]);
+    expect(noteOns.map((event) => event.absoluteTick).sort((a, b) => a - b)).toEqual([0, 1920]);
+  });
+
   it('supports explicit program/channel mapping and playback-stream parity + deterministic humanization', () => {
     const score = createScore('PlaybackParity');
     const part = score.parts[0];

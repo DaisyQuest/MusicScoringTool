@@ -13,6 +13,8 @@ export const durationToTicks = (duration: Duration, dots: 0 | 1 | 2): number => 
     quarter: 480,
     eighth: 240,
     sixteenth: 120,
+    thirtySecond: 60,
+    sixtyFourth: 30,
   }[duration];
   if (dots === 0) return base;
   if (dots === 1) return base + base / 2;

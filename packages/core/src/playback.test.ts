@@ -110,6 +110,82 @@ describe('generatePlaybackEvents', () => {
   });
 });
 
+
+  it('includes note events from every staff and part', () => {
+    const score = createScore();
+    score.parts[0].staves.push({
+      id: 'staff-2',
+      clef: 'bass',
+      measures: [
+        {
+          id: 'm-bass-1',
+          number: 1,
+          voices: [
+            { id: 'v-bass-1', events: [createNoteEvent({ step: 'C', octave: 3 }, 'half')] },
+          ],
+          chordSymbols: [],
+        },
+      ],
+    });
+    score.parts.push({
+      id: 'part-2',
+      name: 'Strings',
+      staves: [
+        {
+          id: 'staff-3',
+          clef: 'treble',
+          measures: [
+            {
+              id: 'm-strings-1',
+              number: 1,
+              voices: [{ id: 'v-strings-1', events: [createNoteEvent({ step: 'G', octave: 4 }, 'quarter')] }],
+              chordSymbols: [],
+            },
+          ],
+        },
+      ],
+    });
+    score.parts[0].staves[0].measures[0].voices[0].events = [createNoteEvent({ step: 'E', octave: 4 }, 'quarter')];
+
+    const { events } = generatePlaybackEvents(score, { expressive: false });
+    expect(events.map((event) => event.midi).sort((a, b) => a - b)).toEqual([48, 64, 67]);
+  });
+
+  it('uses staff-local traversal to preserve measure timing with uneven measure counts', () => {
+    const score = createScore();
+    const upper = score.parts[0].staves[0];
+    upper.measures = [
+      {
+        id: 'm1',
+        number: 1,
+        voices: [{ id: 'v1', events: [createNoteEvent({ step: 'C', octave: 4 }, 'quarter')] }],
+        chordSymbols: [],
+      },
+      {
+        id: 'm2',
+        number: 2,
+        voices: [{ id: 'v2', events: [createNoteEvent({ step: 'D', octave: 4 }, 'quarter')] }],
+        chordSymbols: [],
+      },
+    ];
+
+    score.parts[0].staves.push({
+      id: 'lower',
+      clef: 'bass',
+      measures: [
+        {
+          id: 'm1-l',
+          number: 1,
+          voices: [{ id: 'v1-l', events: [createNoteEvent({ step: 'C', octave: 3 }, 'half')] }],
+          chordSymbols: [],
+        },
+      ],
+    });
+
+    const { events } = generatePlaybackEvents(score);
+    expect(events.find((event) => event.midi === 62)?.tick).toBe(480);
+  });
+
 describe('scheduler transport adapter', () => {
   class VirtualScheduler implements Scheduler {
     public queue: Array<{ id: number; atTick: number; callback: () => void }> = [];
