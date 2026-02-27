@@ -1,4 +1,4 @@
-import { applyCommand, cloneScore, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef } from '@scorecraft/core';
+import { applyCommand, cloneScore, createScore, deserializeScore, serializeScore, type Duration, type Pitch, type Score, type SelectionRef, type VoiceEvent } from '@scorecraft/core';
 import { exportMidi } from '@scorecraft/midi';
 import { renderDesktopShellHtml, type DesktopShellUiModel } from '@scorecraft/ui';
 
@@ -281,6 +281,13 @@ const modeLabel = (mode: DesktopMode): string => {
 const notificationPreview = (state: DesktopShellState): DesktopShellUiModel['notifications'] =>
   state.notifications.slice(-5).map((notification) => ({ level: notification.level, message: notification.message }));
 
+const eventToStaffNote = (event: VoiceEvent): string | undefined => {
+  if (event.type !== 'note') {
+    return undefined;
+  }
+  return `${event.pitch.step}${event.pitch.octave}`;
+};
+
 export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()): string => {
   const measure = state.score.parts[0]?.staves[0]?.measures[0];
   const voice = measure?.voices[0];
@@ -298,6 +305,10 @@ export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()
       { label: 'Last action', value: state.transport.lastAction },
     ],
     notifications: notificationPreview(state),
+    staffPreview: {
+      measureLabel: `Measure ${measure?.number ?? 1} · ${state.score.parts[0]?.staves[0]?.clef ?? 'treble'} clef`,
+      notes: (voice?.events.map(eventToStaffNote).filter((note): note is string => note !== undefined) ?? []).slice(-10),
+    },
   };
 
   return renderDesktopShellHtml(model);

@@ -16,6 +16,12 @@
     },
     {
       "path": "../../packages/ui"
+    },
+    {
+      "path": "../../packages/engraving"
     }
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }

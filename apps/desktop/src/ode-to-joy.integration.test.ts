@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyCommand, serializeScore, type Pitch } from '@scorecraft/core';
 import { exportMidi, parseMidi } from '@scorecraft/midi';
-import { renderScore } from '../../../packages/engraving/src/index.js';
+import { renderScore } from '@scorecraft/engraving';
 import { createDesktopShell, setMode, stepInsertNote } from './index.js';
 import { startDesktopServer } from './server.js';
 
@@ -94,7 +94,9 @@ const transposePitch = (pitch: Pitch, semitones: number): Pitch => {
     11: { step: 'B', accidental: 0 },
   };
   const mapped = map[((midi % 12) + 12) % 12] ?? { step: 'C', accidental: 0 };
-  return { step: mapped.step, octave, accidental: mapped.accidental };
+  return mapped.accidental === 0
+    ? { step: mapped.step, octave }
+    : { step: mapped.step, octave, accidental: mapped.accidental };
 };
 
 const writeAllExportFormats = async (basePath: string, scoreJson: string, midiBytes: Uint8Array, svg: string, normalizedSvg: string, hash: string): Promise<void> => {

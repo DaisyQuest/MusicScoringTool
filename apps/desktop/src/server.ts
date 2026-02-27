@@ -1,4 +1,4 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyHotkey, createDesktopShell, desktopShellBoot, setMode, stepInsertNote, type DesktopShellState } from './index.js';
@@ -23,20 +23,34 @@ export const resolveDesktopPort = (rawPort: string | undefined, fallback = DEFAU
   return port;
 };
 
-const readRequestBody = async (request: Parameters<typeof createServer>[0]): Promise<string> =>
+const readRequestBody = async (request: IncomingMessage): Promise<string> =>
   await new Promise<string>((resolveBody, rejectBody) => {
     let body = '';
     request.setEncoding('utf8');
-    request.on('data', (chunk) => {
+    request.on('data', (chunk: string) => {
       body += chunk;
     });
     request.on('end', () => resolveBody(body));
-    request.on('error', (error) => rejectBody(error));
+    request.on('error', (error: Error) => rejectBody(error));
   });
 
-const sendJson = (response: Parameters<Parameters<typeof createServer>[1]>[1], statusCode: number, payload: unknown): void => {
+const sendJson = (response: ServerResponse<IncomingMessage>, statusCode: number, payload: unknown): void => {
   response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
+};
+
+const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' => {
+  switch (duration) {
+    case 'whole':
+    case 'half':
+    case 'quarter':
+    case 'eighth':
+      return duration;
+    case '16th':
+      return 'sixteenth';
+    default:
+      return 'quarter';
+  }
 };
 
 export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT)): DesktopServer => {
@@ -79,7 +93,7 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           shellState = setMode(shellState, 'note-input');
         }
 
-        shellState = stepInsertNote(shellState, { step: payload.pitch.step, octave: payload.pitch.octave }, payload.duration ?? 'quarter', payload.dots ?? 0);
+        shellState = stepInsertNote(shellState, { step: payload.pitch.step, octave: payload.pitch.octave }, coerceDuration(payload.duration), payload.dots ?? 0);
         sendJson(response, 200, { ok: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to insert note.';

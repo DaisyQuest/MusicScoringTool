@@ -26,6 +26,7 @@ describe('@scorecraft/ui', () => {
         { level: 'error', message: 'Disk "A" unavailable' },
         { level: 'info', message: 'Press Cmd+K for commands' },
       ],
+      staffPreview: { measureLabel: 'Measure 1 · treble clef', notes: ['C4', 'E4'] },
     });
 
     expect(html).toContain('<!doctype html>');
@@ -38,6 +39,8 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('data-hotkey="space"');
     expect(html).toContain('id="insert-note"');
     expect(html).toContain('/api/notes');
+    expect(html).toContain('Staff preview');
+    expect(html).toContain('aria-label="Staff preview with 2 notes"');
   });
 
   it('renders empty states and saved styling when no stats or notifications exist', () => {
@@ -49,10 +52,12 @@ describe('@scorecraft/ui', () => {
       statusTone: 'stable',
       stats: [],
       notifications: [],
+      staffPreview: { measureLabel: 'Measure 1 · treble clef', notes: [] },
     });
 
     expect(html).toContain('No score metrics yet. Start entering notes to populate analytics.');
     expect(html).toContain('No notifications.');
     expect(html).toContain('All changes saved');
+    expect(html).toContain('Enter notes to see them on the staff.');
   });
 });
