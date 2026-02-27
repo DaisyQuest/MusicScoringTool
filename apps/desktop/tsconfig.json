@@ -4,9 +4,18 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [
-    { "path": "../../packages/core" },
-    { "path": "../../packages/midi" }
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/midi"
+    },
+    {
+      "path": "../../packages/ui"
+    }
   ]
 }

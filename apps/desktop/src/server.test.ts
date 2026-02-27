@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDesktopServer, startDesktopServer } from './server.js';
 
 describe('desktop server', () => {
-  it('serves boot readiness string over HTTP', async () => {
+  it('serves boot readiness HTML over HTTP', async () => {
     const desktopServer = await startDesktopServer(0);
     const address = desktopServer.server.address();
     if (!address || typeof address === 'string') {
@@ -13,8 +13,9 @@ describe('desktop server', () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('content-type')).toContain('text/plain');
-    expect(body).toBe('scorecraft-desktop-shell-ready');
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(body).toContain('<!doctype html>');
+    expect(body).toContain('Scorecraft Desktop');
 
     await new Promise<void>((resolve, reject) => {
       desktopServer.server.close((error) => {
