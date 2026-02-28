@@ -52,6 +52,12 @@ const isArticulation = (value: unknown): value is 'none' | 'accent' | 'staccato'
 const isNavigationMarker = (value: unknown): value is 'DC' | 'DS' | 'Fine' | 'Coda' =>
   value === 'DC' || value === 'DS' || value === 'Fine' || value === 'Coda';
 
+const isDuration = (value: unknown): value is 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' =>
+  value === 'whole' || value === 'half' || value === 'quarter' || value === 'eighth' || value === '16th' || value === '32nd' || value === '64th';
+
+const isStep = (value: unknown): value is 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' =>
+  value === 'A' || value === 'B' || value === 'C' || value === 'D' || value === 'E' || value === 'F' || value === 'G';
+
 const coerceDuration = (duration: 'whole' | 'half' | 'quarter' | 'eighth' | '16th' | '32nd' | '64th' | undefined): 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth' | 'thirtySecond' | 'sixtyFourth' => {
   switch (duration) {
     case 'whole':
@@ -217,13 +223,28 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           dots?: 0 | 1 | 2;
         };
 
-        if (!payload.pitch?.step || typeof payload.pitch.octave !== 'number') {
-          sendJson(response, 400, { error: 'Invalid pitch payload.' });
+        if (!isStep(payload.pitch?.step) || typeof payload.pitch.octave !== 'number') {
+          sendJson(response, 400, { error: 'Invalid pitch payload. Expected step A-G and numeric octave.' });
+          return;
+        }
+
+        if (payload.duration !== undefined && !isDuration(payload.duration)) {
+          sendJson(response, 400, { error: 'Invalid duration payload. Use whole, half, quarter, eighth, 16th, 32nd, or 64th.' });
+          return;
+        }
+
+        if (payload.dots !== undefined && ![0, 1, 2].includes(payload.dots)) {
+          sendJson(response, 400, { error: 'Invalid dots payload. Use 0, 1, or 2.' });
           return;
         }
 
         const step = payload.pitch.step;
         const octave = payload.pitch.octave;
+        if (octave < 0 || octave > 8) {
+          sendJson(response, 400, { error: 'Invalid octave payload. Use an octave between 0 and 8.' });
+          return;
+        }
+
         commitMutation((state) => {
           const noteModeState = state.mode !== 'note-input' ? setMode(state, 'note-input') : state;
           return stepInsertNote(noteModeState, { step, octave }, coerceDuration(payload.duration), payload.dots ?? 0);
