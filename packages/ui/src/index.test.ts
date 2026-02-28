@@ -56,6 +56,12 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('Unsaved changes');
     expect(html).toContain('data-transport-action="toggle-playback"');
     expect(html).toContain('id="insert-note"');
+    expect(html).toContain('Insert Note');
+    expect(html).toContain('id="note-duration"');
+    expect(html).toContain('id="note-dots"');
+    expect(html).toContain('Getting started checklist');
+    expect(html).toContain('Quick start');
+    expect(html).toContain('id="action-feedback"');
     expect(html).toContain('id="add-measure"');
     expect(html).toContain('id="apply-engraving"');
     expect(html).toContain('id="apply-text-symbols"');
@@ -106,6 +112,7 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('No measures available.');
     expect(html).toContain('Selection inspector (default)');
     expect(html).toContain('duration quarter, accidental natural, dot off, tie off');
+    expect(html).toContain('Tip: insert a note to hear immediate playback changes.');
     expect(html).toContain('value="112"');
     expect(html).toContain('id="repeat-start" type="checkbox" checked');
     expect(html).toContain('class="status-chip playback-idle"');

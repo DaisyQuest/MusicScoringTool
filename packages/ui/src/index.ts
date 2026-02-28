@@ -201,6 +201,7 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
       button:hover { border-color: var(--accent); }
       .top-shell { padding: 1rem 1.3rem; border-bottom: 1px solid #2f3452; background: linear-gradient(125deg, #202a4a, #1a1e34 45%, #141422); display: grid; gap: 0.75rem; }
       .command-region { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+      .command-region label { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.85rem; }
       .project-meta { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
       .mode-tabs { display: inline-flex; gap: 0.35rem; }
       .mode-tab.active { border-color: var(--accent); color: var(--accent); }
@@ -241,6 +242,9 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
       .measure-label { fill: var(--muted); font-size: 11px; }
       .placeholder-note { fill: var(--muted); }
       .empty-state { margin: 0.9rem 0 0; color: var(--muted); font-style: italic; }
+      .getting-started { margin-top: 0.9rem; padding: 0.75rem; border-radius: 12px; background: rgb(110 231 255 / 8%); border: 1px solid rgb(110 231 255 / 22%); }
+      .getting-started ol { margin: 0.4rem 0 0; padding-left: 1.1rem; color: var(--muted); display: grid; gap: 0.35rem; }
+      .action-feedback { min-height: 1.35rem; margin: 0.7rem 0 0; color: var(--muted); font-size: 0.85rem; }
       kbd { border: 1px solid #4b5888; border-bottom-width: 2px; border-radius: 6px; padding: 0.05rem 0.35rem; font-size: 0.72rem; color: #d9def8; background: #0f1428; }
     </style>
   </head>
@@ -289,6 +293,14 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
         <section class="panel score-stage">
           <h2>Score stage</h2>
           <p class="subhead">Always-visible intent: duration ${intent.duration}, accidental ${intent.accidental}, dot ${intent.dot ? 'on' : 'off'}, tie ${intent.tie ? 'on' : 'off'}.</p>
+          <section class="getting-started" aria-label="Getting started checklist">
+            <h2>Quick start</h2>
+            <ol>
+              <li>Choose a note step, octave, and duration.</li>
+              <li>Press <strong>Insert Note</strong> or use <kbd>N</kbd> then note hotkeys.</li>
+              <li>Use <strong>Add Measure</strong> to continue writing.</li>
+            </ol>
+          </section>
           <div class="entry-strip" aria-label="Step entry intent toolbar">
             <span class="entry-chip active">Duration: ${intent.duration}</span>
             <span class="entry-chip">Accidental: ${intent.accidental}</span>
@@ -299,11 +311,20 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
           <div class="command-region" aria-label="Score controls">
             <button type="button" data-transport-action="toggle-playback">Play / Stop <kbd>Space</kbd></button>
             <button type="button" data-transport-action="seek-start">Rewind</button>
-            <select id="note-step" aria-label="Note step"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option></select>
-            <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" />
-            <button type="button" id="insert-note">Insert Quarter Note</button>
+            <label>Step
+              <select id="note-step" aria-label="Note step"><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option><option>A</option><option>B</option></select>
+            </label>
+            <label>Octave <input id="note-octave" type="number" min="0" max="8" value="4" aria-label="Note octave" /></label>
+            <label>Duration
+              <select id="note-duration" aria-label="Note duration"><option value="whole">whole</option><option value="half">half</option><option value="quarter" selected>quarter</option><option value="eighth">eighth</option><option value="16th">16th</option><option value="32nd">32nd</option><option value="64th">64th</option></select>
+            </label>
+            <label>Dots
+              <select id="note-dots" aria-label="Note dots"><option value="0" selected>0</option><option value="1">1</option><option value="2">2</option></select>
+            </label>
+            <button type="button" id="insert-note">Insert Note</button>
             <button type="button" id="add-measure">Add Measure</button>
           </div>
+          <p id="action-feedback" class="action-feedback" role="status" aria-live="polite">Tip: insert a note to hear immediate playback changes.</p>
           ${renderScorePreview(model.scorePreview)}
         </section>
 
@@ -386,6 +407,13 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
         location.reload();
       };
 
+      const showFeedback = (message) => {
+        const feedback = document.getElementById('action-feedback');
+        if (feedback) {
+          feedback.textContent = message;
+        }
+      };
+
       for (const button of document.querySelectorAll('[data-hotkey]')) {
         button.addEventListener('click', async () => {
           try {
@@ -409,9 +437,20 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
       document.getElementById('insert-note')?.addEventListener('click', async () => {
         const step = document.getElementById('note-step')?.value;
         const octave = Number(document.getElementById('note-octave')?.value);
+        const duration = document.getElementById('note-duration')?.value;
+        const dots = Number(document.getElementById('note-dots')?.value);
+        if (!Number.isFinite(octave) || octave < 0 || octave > 8) {
+          showFeedback('Octave must be a number between 0 and 8.');
+          return;
+        }
+        if (!Number.isFinite(dots) || dots < 0 || dots > 2) {
+          showFeedback('Dots must be 0, 1, or 2.');
+          return;
+        }
         try {
-          await runAction('/api/notes', { pitch: { step, octave }, duration: 'quarter', dots: 0 });
+          await runAction('/api/notes', { pitch: { step, octave }, duration, dots });
         } catch (error) {
+          showFeedback(error instanceof Error ? error.message : String(error));
           alert(error instanceof Error ? error.message : String(error));
         }
       });

@@ -216,6 +216,9 @@ describe('desktop server', () => {
     expect(html).toContain('<kbd>T</kbd>');
     expect(html).toContain('<kbd>⌘K</kbd>');
     expect(html).toContain('id="insert-note"');
+    expect(html).toContain('id="note-duration"');
+    expect(html).toContain('id="note-dots"');
+    expect(html).toContain('Getting started checklist');
     expect(html).toContain('id="add-measure"');
     expect(html).toContain('id="apply-engraving"');
     expect(html).toContain('Selection inspector (default)');
@@ -434,6 +437,30 @@ describe('desktop server', () => {
       body: JSON.stringify({}),
     });
     expect(missingExportPath.status).toBe(400);
+
+    const invalidDuration = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: '128th', dots: 0 }),
+    });
+    expect(invalidDuration.status).toBe(400);
+    expect(await invalidDuration.json()).toMatchObject({ error: expect.stringContaining('Invalid duration') });
+
+    const invalidDots = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { step: 'C', octave: 4 }, duration: 'quarter', dots: 3 }),
+    });
+    expect(invalidDots.status).toBe(400);
+    expect(await invalidDots.json()).toMatchObject({ error: expect.stringContaining('Invalid dots') });
+
+    const invalidOctave = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pitch: { step: 'C', octave: 9 }, duration: 'quarter', dots: 0 }),
+    });
+    expect(invalidOctave.status).toBe(400);
+    expect(await invalidOctave.json()).toMatchObject({ error: expect.stringContaining('Invalid octave') });
 
     const invalidNote = await fetch(`${baseUrl}/api/notes`, {
       method: 'POST',
