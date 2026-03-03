@@ -452,13 +452,16 @@ const normalizeEntrypointPath = (entryPath: string): string => {
   return withoutDrivePrefixSlash.replace(/^([a-zA-Z]:)/, (_, driveLetter: string) => driveLetter.toLowerCase());
 };
 
+const toModuleEntrypointPath = (moduleUrlOrPath: string): string =>
+  moduleUrlOrPath.startsWith('file:') ? fileURLToPath(moduleUrlOrPath) : moduleUrlOrPath;
+
 export const isServerEntrypointInvocation = (moduleUrl: string, argvPath: string | undefined): boolean => {
   if (!argvPath) {
     return false;
   }
 
   return (
-    normalizeEntrypointPath(toComparableEntrypointPath(fileURLToPath(moduleUrl))) ===
+    normalizeEntrypointPath(toComparableEntrypointPath(toModuleEntrypointPath(moduleUrl))) ===
     normalizeEntrypointPath(toComparableEntrypointPath(argvPath))
   );
 };

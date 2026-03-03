@@ -523,6 +523,12 @@ describe('desktop server', () => {
     expect(isServerEntrypointInvocation('file:///workspace/MusicScoringTool/apps/desktop/src/server.ts', undefined)).toBe(false);
   });
 
+
+  it('accepts non-file module paths when determining entrypoint invocation', () => {
+    expect(isServerEntrypointInvocation('/workspace/MusicScoringTool/apps/desktop/src/server.ts', '/workspace/MusicScoringTool/apps/desktop/src/server.ts')).toBe(true);
+    expect(isServerEntrypointInvocation('/workspace/MusicScoringTool/apps/desktop/src/server.ts', '/workspace/MusicScoringTool/apps/desktop/src/other.ts')).toBe(false);
+  });
+
   it('supports Windows-style argv paths when determining entrypoint invocation', () => {
     expect(isServerEntrypointInvocation('file:///C:/MusicScoringTool/apps/desktop/dist/server.js', 'C:\\MusicScoringTool\\apps\\desktop\\dist\\server.js')).toBe(true);
     expect(isServerEntrypointInvocation('file:///C:/MusicScoringTool/apps/desktop/dist/server.js', 'C:\\MusicScoringTool\\apps\\desktop\\dist\\index.js')).toBe(false);
