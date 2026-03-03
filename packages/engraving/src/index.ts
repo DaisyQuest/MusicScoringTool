@@ -159,10 +159,58 @@ const normalizeForHash = (svg: string): string =>
 
 const hashString = (value: string): string => createHash('sha256').update(value).digest('hex');
 
+const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+
+const escapeXml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
+const restGlyphByDuration: Record<Extract<CanonicalEvent, { type: 'rest' }>['duration'], string> = {
+  whole: '𝄻',
+  half: '𝄼',
+  quarter: '𝄽',
+  eighth: '𝄾',
+  sixteenth: '𝄿',
+};
+
+const clefGlyphByClef: Record<CanonicalStaff['clef'], string> = {
+  treble: '𝄞',
+  bass: '𝄢',
+  alto: '𝄡',
+  tenor: '𝄡',
+};
+
+const noteSpacingByDuration: Record<Extract<CanonicalEvent, { type: 'note' }>['duration'], number> = {
+  whole: 52,
+  half: 42,
+  quarter: 34,
+  eighth: 30,
+  sixteenth: 26,
+};
 
 const pitchToY = (pitch: CanonicalPitch, staffTop: number): number => {
   const relative = pitch.octave * 7 + STEP_INDEX[pitch.step] - (4 * 7 + STEP_INDEX.E);
   return staffTop + 40 - relative * 5;
+};
+
+const ledgerLineYs = (noteY: number, staffTop: number): number[] => {
+  const topLine = staffTop;
+  const bottomLine = staffTop + 40;
+  const ledger: number[] = [];
+
+  if (noteY < topLine) {
+    for (let y = topLine - 10; y >= noteY - 2; y -= 10) ledger.push(y);
+  }
+
+  if (noteY > bottomLine) {
+    for (let y = bottomLine + 10; y <= noteY + 2; y += 10) ledger.push(y);
+  }
+
+  return ledger;
 };
 
 const registerPrimitive = (
@@ -183,14 +231,26 @@ const registerPrimitive = (
 };
 
 export const renderScore = (score: CanonicalScore, options: RenderOptions = {}): EngravingRender => {
-  const width = options.width ?? 1024;
+  const width = Math.max(360, options.width ?? 1024);
   const theme = THEMES[options.theme ?? 'light'];
   const selected = new Set(options.selectedIds ?? []);
   const staffTop = 60;
-  const measureWidth = 220;
+  const staffBottom = staffTop + 40;
   const part = score.parts[0];
   const staff = part?.staves[0];
   const measures = staff?.measures ?? [];
+  const leftMargin = 40;
+  const rightMargin = 40;
+  const clefWidth = 42;
+  const leadingPadding = 14;
+  const fallbackMeasureWidth = 220;
+  const minMeasureWidth = 140;
+  const availableWidth = Math.max(
+    minMeasureWidth,
+    width - leftMargin - rightMargin - clefWidth - leadingPadding - measures.length * 8,
+  );
+  const measureWidth = measures.length > 0 ? Math.max(minMeasureWidth, availableWidth / measures.length) : fallbackMeasureWidth;
+  const measureStart = leftMargin + clefWidth + leadingPadding;
 
   const primitives: Primitive[] = [];
   const pieces: string[] = [];
@@ -201,62 +261,83 @@ export const renderScore = (score: CanonicalScore, options: RenderOptions = {}):
 
   for (let i = 0; i < 5; i += 1) {
     const y = staffTop + i * 10;
-    registerPrimitive(primitives, 'staffLine', { x: 40, y: y - 1, width: width - 80, height: 2 }, staff?.id);
-    pieces.push(`<line x1="40" y1="${y}" x2="${width - 40}" y2="${y}" stroke="${theme.staffLine}" stroke-width="1" />`);
+    registerPrimitive(primitives, 'staffLine', { x: leftMargin, y: y - 1, width: width - leftMargin - rightMargin, height: 2 }, staff?.id);
+    pieces.push(`<line x1="${leftMargin}" y1="${y}" x2="${width - rightMargin}" y2="${y}" stroke="${theme.staffLine}" stroke-width="1" />`);
   }
 
   if (staff) {
-    registerPrimitive(primitives, 'clef', { x: 50, y: staffTop - 8, width: 20, height: 44 }, staff.id);
-    pieces.push(`<text x="52" y="${staffTop + 28}" fill="${theme.glyph}" font-size="34">${staff.clef === 'bass' ? '𝄢' : '𝄞'}</text>`);
+    const clefGlyph = clefGlyphByClef[staff.clef] ?? clefGlyphByClef.treble;
+    registerPrimitive(primitives, 'clef', { x: leftMargin + 8, y: staffTop - 10, width: clefWidth, height: 46 }, staff.id);
+    pieces.push(`<text x="${leftMargin + 10}" y="${staffTop + 28}" fill="${theme.glyph}" font-size="34">${clefGlyph}</text>`);
   }
 
   measures.forEach((measure, measureIndex) => {
-    const measureX = 80 + measureIndex * measureWidth;
-    registerPrimitive(primitives, 'barline', { x: measureX - 8, y: staffTop, width: 2, height: 40 }, measure.id, `bar-${measure.id}-start`);
-    pieces.push(`<line x1="${measureX - 8}" y1="${staffTop}" x2="${measureX - 8}" y2="${staffTop + 40}" stroke="${theme.staffLine}" stroke-width="1" />`);
+    const measureX = measureStart + measureIndex * (measureWidth + 8);
+    registerPrimitive(primitives, 'barline', { x: measureX - 4, y: staffTop, width: 2, height: 40 }, measure.id, `bar-${measure.id}-start`);
+    pieces.push(`<line x1="${measureX - 4}" y1="${staffTop}" x2="${measureX - 4}" y2="${staffBottom}" stroke="${theme.staffLine}" stroke-width="1" />`);
+
+    let notationOffset = 0;
 
     if (measure.timeSignature) {
-      registerPrimitive(primitives, 'timeSignature', { x: measureX + 24, y: staffTop - 4, width: 24, height: 42 }, measure.id);
-      pieces.push(
-        `<text x="${measureX + 24}" y="${staffTop + 12}" fill="${theme.glyph}" font-size="16">${measure.timeSignature.numerator}</text>`,
-      );
-      pieces.push(
-        `<text x="${measureX + 24}" y="${staffTop + 28}" fill="${theme.glyph}" font-size="16">${measure.timeSignature.denominator}</text>`,
-      );
+      registerPrimitive(primitives, 'timeSignature', { x: measureX + notationOffset, y: staffTop - 4, width: 24, height: 42 }, measure.id);
+      pieces.push(`<text x="${measureX + notationOffset}" y="${staffTop + 12}" fill="${theme.glyph}" font-size="16">${measure.timeSignature.numerator}</text>`);
+      pieces.push(`<text x="${measureX + notationOffset}" y="${staffTop + 28}" fill="${theme.glyph}" font-size="16">${measure.timeSignature.denominator}</text>`);
+      notationOffset += 26;
     }
 
     if (measure.keySignature) {
-      const keyGlyph = `${measure.keySignature.fifths >= 0 ? '#' : 'b'}${Math.abs(measure.keySignature.fifths)}`;
-      registerPrimitive(primitives, 'keySignature', { x: measureX + 52, y: staffTop + 6, width: 22, height: 14 }, measure.id);
-      pieces.push(`<text x="${measureX + 52}" y="${staffTop + 18}" fill="${theme.subtleGlyph}" font-size="14">${keyGlyph}</text>`);
+      const accidental = measure.keySignature.fifths >= 0 ? '#' : 'b';
+      const keyGlyph = `${accidental}${Math.abs(measure.keySignature.fifths)}`;
+      registerPrimitive(primitives, 'keySignature', { x: measureX + notationOffset, y: staffTop + 6, width: 24, height: 14 }, measure.id);
+      pieces.push(`<text x="${measureX + notationOffset}" y="${staffTop + 18}" fill="${theme.subtleGlyph}" font-size="14">${keyGlyph}</text>`);
+      notationOffset += 26;
     }
 
     if (measure.repeatStart || measure.repeatEnd) {
-      registerPrimitive(primitives, 'repeat', { x: measureX - 4, y: staffTop, width: 8, height: 40 }, measure.id);
+      registerPrimitive(primitives, 'repeat', { x: measureX - 2, y: staffTop, width: 10, height: 40 }, measure.id);
       if (measure.repeatStart) {
-        pieces.push(`<circle cx="${measureX - 2}" cy="${staffTop + 14}" r="1.7" fill="${theme.glyph}" />`);
-        pieces.push(`<circle cx="${measureX - 2}" cy="${staffTop + 26}" r="1.7" fill="${theme.glyph}" />`);
+        pieces.push(`<line x1="${measureX + 1}" y1="${staffTop}" x2="${measureX + 1}" y2="${staffBottom}" stroke="${theme.glyph}" stroke-width="2"/>`);
+        pieces.push(`<circle cx="${measureX + 4}" cy="${staffTop + 14}" r="1.7" fill="${theme.glyph}" />`);
+        pieces.push(`<circle cx="${measureX + 4}" cy="${staffTop + 26}" r="1.7" fill="${theme.glyph}" />`);
       }
       if (measure.repeatEnd) {
-        pieces.push(`<circle cx="${measureX + measureWidth - 12}" cy="${staffTop + 14}" r="1.7" fill="${theme.glyph}" />`);
-        pieces.push(`<circle cx="${measureX + measureWidth - 12}" cy="${staffTop + 26}" r="1.7" fill="${theme.glyph}" />`);
+        const endX = measureX + measureWidth - 6;
+        pieces.push(`<line x1="${endX}" y1="${staffTop}" x2="${endX}" y2="${staffBottom}" stroke="${theme.glyph}" stroke-width="2"/>`);
+        pieces.push(`<circle cx="${endX - 3}" cy="${staffTop + 14}" r="1.7" fill="${theme.glyph}" />`);
+        pieces.push(`<circle cx="${endX - 3}" cy="${staffTop + 26}" r="1.7" fill="${theme.glyph}" />`);
       }
     }
 
     if (measure.volta) {
-      registerPrimitive(primitives, 'volta', { x: measureX + 8, y: staffTop - 28, width: measureWidth - 20, height: 18 }, measure.id);
-      pieces.push(`<path d="M ${measureX + 8} ${staffTop - 12} H ${measureX + measureWidth - 12} V ${staffTop - 5}" stroke="${theme.glyph}" fill="none"/>`);
-      pieces.push(`<text x="${measureX + 12}" y="${staffTop - 14}" fill="${theme.glyph}" font-size="12">${measure.volta}.</text>`);
+      registerPrimitive(primitives, 'volta', { x: measureX + 6, y: staffTop - 28, width: measureWidth - 12, height: 18 }, measure.id);
+      pieces.push(`<path d="M ${measureX + 6} ${staffTop - 12} H ${measureX + measureWidth - 6} V ${staffTop - 5}" stroke="${theme.glyph}" fill="none"/>`);
+      pieces.push(`<text x="${measureX + 10}" y="${staffTop - 14}" fill="${theme.glyph}" font-size="12">${measure.volta}.</text>`);
     }
 
     const voice = measure.voices[0];
     const events = voice?.events ?? [];
+    const durationUnits = events.reduce((sum, event) => {
+      if (event.type === 'rest') return sum + noteSpacingByDuration[event.duration];
+      return sum + noteSpacingByDuration[event.duration];
+    }, 0);
+    const drawableWidth = Math.max(40, measureWidth - notationOffset - 24);
+    const scale = durationUnits > 0 ? drawableWidth / durationUnits : 1;
+    const firstEventX = measureX + notationOffset + 12;
+
     const noteXs: number[] = [];
-    events.forEach((event, eventIndex) => {
-      const x = measureX + 90 + eventIndex * 28;
+    let cursorX = firstEventX;
+
+    events.forEach((event) => {
+      const spacing = (event.type === 'rest' ? noteSpacingByDuration[event.duration] : noteSpacingByDuration[event.duration]) * scale;
+      const x = clamp(cursorX + spacing / 2, measureX + notationOffset + 10, measureX + measureWidth - 18);
+      cursorX += spacing;
       if (event.type === 'rest') {
-        registerPrimitive(primitives, 'rest', { x: x - 5, y: staffTop + 12, width: 10, height: 12 }, event.id);
-        pieces.push(`<text x="${x - 4}" y="${staffTop + 22}" fill="${theme.glyph}" font-size="16">𝄽</text>`);
+        registerPrimitive(primitives, 'rest', { x: x - 7, y: staffTop + 10, width: 14, height: 14 }, event.id);
+        pieces.push(`<text x="${x - 7}" y="${staffTop + 23}" fill="${theme.glyph}" font-size="16">${restGlyphByDuration[event.duration]}</text>`);
+        if (selected.has(event.id)) {
+          registerPrimitive(primitives, 'selection', { x: x - 11, y: staffTop + 4, width: 22, height: 22 }, event.id);
+          pieces.push(`<rect x="${x - 11}" y="${staffTop + 4}" width="22" height="22" stroke="${theme.selection}" fill="none" stroke-width="1.2" />`);
+        }
         return;
       }
 
@@ -264,35 +345,51 @@ export const renderScore = (score: CanonicalScore, options: RenderOptions = {}):
       noteCenters.set(event.id, { x, y });
       noteXs.push(x);
       registerPrimitive(primitives, 'notehead', { x: x - 6, y: y - 4, width: 12, height: 8 }, event.id);
-      pieces.push(`<ellipse cx="${x}" cy="${y}" rx="6" ry="4" fill="${theme.glyph}" />`);
+      const noteFill = event.duration === 'whole' || event.duration === 'half' ? 'none' : theme.glyph;
+      pieces.push(`<ellipse cx="${x}" cy="${y}" rx="6" ry="4" fill="${noteFill}" stroke="${theme.glyph}" stroke-width="1" />`);
 
-      const stemUp = y >= staffTop + 20;
-      registerPrimitive(primitives, 'stem', { x: stemUp ? x + 5 : x - 6, y: stemUp ? y - 30 : y, width: 1.5, height: 30 }, event.id);
-      pieces.push(
-        `<line x1="${stemUp ? x + 5 : x - 6}" y1="${stemUp ? y : y}" x2="${stemUp ? x + 5 : x - 6}" y2="${stemUp ? y - 30 : y + 30}" stroke="${theme.glyph}" stroke-width="1.3" />`,
-      );
+      if (event.duration !== 'whole') {
+        const stemUp = y >= staffTop + 20;
+        registerPrimitive(primitives, 'stem', { x: stemUp ? x + 5 : x - 6, y: stemUp ? y - 30 : y, width: 1.5, height: 30 }, event.id);
+        pieces.push(`<line x1="${stemUp ? x + 5 : x - 6}" y1="${y}" x2="${stemUp ? x + 5 : x - 6}" y2="${stemUp ? y - 30 : y + 30}" stroke="${theme.glyph}" stroke-width="1.3" />`);
 
-      if (event.duration === 'eighth' || event.duration === 'sixteenth') {
-        registerPrimitive(primitives, 'beam', { x: x + 4, y: stemUp ? y - 30 : y + 30, width: 12, height: 3 }, event.id);
-        pieces.push(`<rect x="${x + 4}" y="${stemUp ? y - 30 : y + 27}" width="12" height="3" fill="${theme.glyph}" />`);
+        if (event.duration === 'eighth' || event.duration === 'sixteenth') {
+          registerPrimitive(primitives, 'beam', { x: x + (stemUp ? 4 : -16), y: stemUp ? y - 30 : y + 27, width: 12, height: 3 }, event.id);
+          pieces.push(`<rect x="${x + (stemUp ? 4 : -16)}" y="${stemUp ? y - 30 : y + 27}" width="12" height="3" fill="${theme.glyph}" />`);
+          if (event.duration === 'sixteenth') {
+            registerPrimitive(primitives, 'beam', { x: x + (stemUp ? 4 : -16), y: stemUp ? y - 25 : y + 22, width: 12, height: 3 }, event.id);
+            pieces.push(`<rect x="${x + (stemUp ? 4 : -16)}" y="${stemUp ? y - 25 : y + 22}" width="12" height="3" fill="${theme.glyph}" />`);
+          }
+        }
       }
 
-      if (y < staffTop - 2 || y > staffTop + 42) {
-        const ledgerY = y < staffTop ? staffTop - 5 : staffTop + 45;
+      for (const ledgerY of ledgerLineYs(y, staffTop)) {
         registerPrimitive(primitives, 'ledgerLine', { x: x - 9, y: ledgerY, width: 18, height: 1 }, event.id);
         pieces.push(`<line x1="${x - 9}" y1="${ledgerY}" x2="${x + 9}" y2="${ledgerY}" stroke="${theme.staffLine}" stroke-width="1" />`);
+      }
+
+      if (event.dots > 0) {
+        for (let dot = 0; dot < event.dots; dot += 1) {
+          const dotX = x + 9 + dot * 4;
+          registerPrimitive(primitives, 'articulation', { x: dotX - 1.5, y: y - 1.5, width: 3, height: 3 }, event.id, `dot-${event.id}-${dot + 1}`);
+          pieces.push(`<circle cx="${dotX}" cy="${y}" r="1.5" fill="${theme.glyph}" />`);
+        }
       }
 
       event.articulations.forEach((art, artIndex) => {
         const yOffset = art === 'tenuto' ? -11 : -9;
         registerPrimitive(primitives, 'articulation', { x: x - 4 + artIndex * 2, y: y + yOffset, width: 8, height: 3 }, event.id);
-        const shape = art === 'accent' ? `<path d="M ${x - 4} ${y - 8} L ${x + 5} ${y - 9} L ${x - 4} ${y - 10} Z" fill="${theme.glyph}" />` : art === 'tenuto' ? `<line x1="${x - 4}" y1="${y - 9}" x2="${x + 4}" y2="${y - 9}" stroke="${theme.glyph}" />` : `<circle cx="${x}" cy="${y - 9}" r="1.7" fill="${theme.glyph}" />`;
+        const shape = art === 'accent'
+          ? `<path d="M ${x - 4} ${y - 8} L ${x + 5} ${y - 9} L ${x - 4} ${y - 10} Z" fill="${theme.glyph}" />`
+          : art === 'tenuto'
+            ? `<line x1="${x - 4}" y1="${y - 9}" x2="${x + 4}" y2="${y - 9}" stroke="${theme.glyph}" />`
+            : `<circle cx="${x}" cy="${y - 9}" r="1.7" fill="${theme.glyph}" />`;
         pieces.push(shape);
       });
 
       if (event.dynamics) {
         registerPrimitive(primitives, 'dynamic', { x: x - 8, y: staffTop + 58, width: 18, height: 12 }, event.id);
-        pieces.push(`<text x="${x - 8}" y="${staffTop + 68}" fill="${theme.dynamics}" font-size="12">${event.dynamics}</text>`);
+        pieces.push(`<text x="${x - 8}" y="${staffTop + 68}" fill="${theme.dynamics}" font-size="12">${escapeXml(event.dynamics)}</text>`);
       }
 
       if (selected.has(event.id)) {
@@ -301,15 +398,21 @@ export const renderScore = (score: CanonicalScore, options: RenderOptions = {}):
       }
     });
 
-    if (noteXs.length > 1) {
-      const left = Math.min(...noteXs);
-      const right = Math.max(...noteXs);
-      registerPrimitive(primitives, 'beam', { x: left + 5, y: staffTop - 22, width: right - left, height: 2 }, measure.id);
-      pieces.push(`<line x1="${left + 5}" y1="${staffTop - 22}" x2="${right + 5}" y2="${staffTop - 22}" stroke="${theme.glyph}" stroke-width="2" />`);
+    const beamCandidates = events.filter((event): event is Extract<CanonicalEvent, { type: 'note' }> => event.type === 'note' && (event.duration === 'eighth' || event.duration === 'sixteenth'));
+    if (beamCandidates.length > 1) {
+      const beamPoints = beamCandidates
+        .map((event) => noteCenters.get(event.id))
+        .filter((center): center is { x: number; y: number } => Boolean(center));
+      if (beamPoints.length > 1) {
+        const left = Math.min(...beamPoints.map((point) => point.x));
+        const right = Math.max(...beamPoints.map((point) => point.x));
+        registerPrimitive(primitives, 'beam', { x: left + 5, y: staffTop - 22, width: right - left, height: 2 }, measure.id);
+        pieces.push(`<line x1="${left + 5}" y1="${staffTop - 22}" x2="${right + 5}" y2="${staffTop - 22}" stroke="${theme.glyph}" stroke-width="2" />`);
+      }
     }
 
-    registerPrimitive(primitives, 'barline', { x: measureX + measureWidth - 8, y: staffTop, width: 2, height: 40 }, measure.id, `bar-${measure.id}-end`);
-    pieces.push(`<line x1="${measureX + measureWidth - 8}" y1="${staffTop}" x2="${measureX + measureWidth - 8}" y2="${staffTop + 40}" stroke="${theme.staffLine}" stroke-width="1" />`);
+    registerPrimitive(primitives, 'barline', { x: measureX + measureWidth - 4, y: staffTop, width: 2, height: 40 }, measure.id, `bar-${measure.id}-end`);
+    pieces.push(`<line x1="${measureX + measureWidth - 4}" y1="${staffTop}" x2="${measureX + measureWidth - 4}" y2="${staffBottom}" stroke="${theme.staffLine}" stroke-width="1" />`);
   });
 
   for (const slur of score.slurs) {
@@ -345,7 +448,9 @@ export const renderScore = (score: CanonicalScore, options: RenderOptions = {}):
 
   if (options.caret) {
     const index = measures.findIndex((m) => m.id === options.caret?.measureId);
-    const caretBaseX = 80 + (Math.max(0, index) * measureWidth) + options.caret.x;
+    const safeIndex = Math.max(0, index);
+    const measureX = measureStart + safeIndex * (measureWidth + 8);
+    const caretBaseX = clamp(measureX + options.caret.x, measureX + 6, measureX + measureWidth - 6);
     registerPrimitive(primitives, 'caret', { x: caretBaseX, y: staffTop - 6, width: 1.5, height: 52 }, options.caret.measureId);
     pieces.push(`<line x1="${caretBaseX}" y1="${staffTop - 6}" x2="${caretBaseX}" y2="${staffTop + 46}" stroke="${theme.caret}" stroke-width="1.6" />`);
   }
