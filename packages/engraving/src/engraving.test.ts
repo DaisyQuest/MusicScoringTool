@@ -42,7 +42,7 @@ const createFixtureScore = (): CanonicalScore => ({
                       type: 'note',
                       pitch: { step: 'C', octave: 4 },
                       duration: 'eighth',
-                      dots: 0,
+                      dots: 2,
                       tieStartId: 'note-2',
                       articulations: ['staccato'],
                       dynamics: 'mf',
@@ -155,6 +155,41 @@ describe('engraving adapter', () => {
     expect(first.hash).toBe(second.hash);
   });
 
+
+
+  it('renders duration-specific rest glyphs and note dots', () => {
+    const score = createFixtureScore();
+    const { staff } = getPrimaryVoiceEvents(score);
+    staff.measures[0]?.voices[0]?.events.push(
+      { id: 'rest-whole', type: 'rest', duration: 'whole', dots: 0 },
+      { id: 'rest-half', type: 'rest', duration: 'half', dots: 0 },
+      { id: 'rest-eighth', type: 'rest', duration: 'eighth', dots: 0 },
+      { id: 'rest-sixteenth', type: 'rest', duration: 'sixteenth', dots: 0 },
+    );
+    const render = renderScore(score, { selectedIds: ['rest-1'] });
+
+    expect(render.svg).toContain('𝄻');
+    expect(render.svg).toContain('𝄼');
+    expect(render.svg).toContain('𝄾');
+    expect(render.svg).toContain('𝄿');
+    expect(render.primitives.filter((p) => p.id.startsWith('dot-note-1-'))).toHaveLength(2);
+    expect(render.primitives.some((p) => p.kind === 'selection' && p.modelId === 'rest-1')).toBe(true);
+  });
+
+  it('clamps tiny widths and caret positions into visible regions', () => {
+    const score = createFixtureScore();
+    const render = renderScore(score, {
+      width: 180,
+      caret: { measureId: 'missing-measure', x: 1000 },
+    });
+
+    expect(render.svg).toContain('width="360"');
+    const caret = render.primitives.find((p) => p.kind === 'caret');
+    expect(caret).toBeDefined();
+    expect(caret!.bbox.x).toBeGreaterThan(0);
+    expect(caret!.bbox.x).toBeLessThan(360);
+  });
+
   it('supports dark and light themes', () => {
     const score = createFixtureScore();
     const light = renderScore(score, { theme: 'light' });
@@ -214,6 +249,37 @@ describe('engraving adapter', () => {
     const render = renderScore(score);
     expect(render.primitives.some((p) => p.kind === 'hairpin' && p.modelId === 'hairpin-dim')).toBe(true);
     expect(render.primitives.some((p) => p.id === 'bar-measure-3-start')).toBe(true);
+  });
+
+
+  it('supports alto clef and stemless whole-note rendering', () => {
+    const score = createFixtureScore();
+    const { staff } = getPrimaryVoiceEvents(score);
+    staff.clef = 'alto';
+    staff.measures[0]!.voices[0]!.events = [
+      {
+        id: 'alto-whole',
+        type: 'note',
+        pitch: { step: 'D', octave: 4 },
+        duration: 'whole',
+        dots: 0,
+        articulations: [],
+      },
+      {
+        id: 'alto-half',
+        type: 'note',
+        pitch: { step: 'E', octave: 4 },
+        duration: 'half',
+        dots: 0,
+        articulations: [],
+      },
+    ];
+
+    const render = renderScore(score);
+    expect(render.svg).toContain('𝄡');
+    expect(render.svg).toContain('fill="none"');
+    expect(render.primitives.some((p) => p.kind === 'stem' && p.modelId === 'alto-whole')).toBe(false);
+    expect(render.primitives.some((p) => p.kind === 'stem' && p.modelId === 'alto-half')).toBe(true);
   });
 
   it('renders bass clef fallback glyph and key signature flats', () => {
