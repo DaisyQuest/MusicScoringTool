@@ -108,7 +108,7 @@ const writeAllExportFormats = async (basePath: string, scoreJson: string, midiBy
 };
 
 describe('ODE TO JOY end-to-end scoring integration', () => {
-  const scoresDir = join(process.cwd(), 'scores');
+  const scoresDir = join(process.cwd(), 'testresults', 'integration_tests', 'files', 'ode-to-joy');
 
   afterEach(async () => {
     await rm(scoresDir, { recursive: true, force: true });
