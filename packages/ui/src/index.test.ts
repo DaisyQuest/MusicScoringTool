@@ -29,7 +29,7 @@ describe('@scorecraft/ui', () => {
       scorePreview: {
         clef: 'treble',
         measures: [
-          { number: 1, notes: ['C4', 'E4'], isSelected: true },
+          { number: 1, notes: ['C#4', 'E4'], isSelected: true, tempoBpm: 120, repeatStart: true, repeatEnd: false, chordSymbol: 'G7', navigationMarker: 'DC', dynamics: 'mf', articulation: 'accent' },
           { number: 2, notes: [], isSelected: false },
         ],
       },
@@ -89,6 +89,13 @@ describe('@scorecraft/ui', () => {
     expect(html).toContain('Sheet music preview');
     expect(html).toContain('data-measure="1"');
     expect(html).toContain('data-measure="2"');
+    expect(html).toContain('aria-label="C#4"');
+    expect(html).toContain('♩ = 120');
+    expect(html).toContain('G7');
+    expect(html).toContain('DC');
+    expect(html).toContain('𝄆');
+    expect(html).toContain('class="accidental"');
+    expect(html).toContain('class="dynamics"');
     expect(html).toContain('measure selected');
     expect(html).toContain('Playback: Expressive');
   });
