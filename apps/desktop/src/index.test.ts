@@ -66,6 +66,34 @@ describe('desktop shell', () => {
 
 
 
+
+  it('renders accidentals in sheet preview note labels', () => {
+    let state = createDesktopShell({ title: 'Accidental Preview' });
+    state = setMode(state, 'note-input');
+    state = stepInsertNote(state, { step: 'C', accidental: 1, octave: 4 });
+
+    const html = desktopShellBoot(state);
+    expect(html).toContain('aria-label="C#4"');
+  });
+
+
+  it('projects engraving and text symbols into sheet preview metadata', () => {
+    let state = createDesktopShell({ title: 'Metadata Projection' });
+    state = setMode(state, 'note-input');
+    state = stepInsertNote(state, { step: 'F', accidental: -1, octave: 4 });
+    state = applyInspectorEdits(state, { tempoBpm: 144, repeatStart: true, repeatEnd: true, dynamics: 'ff' });
+    state = applyArticulationEdits(state, 'staccato');
+    state = applyTextSymbolEdits(state, { chordSymbol: 'Bb7', navigationMarker: 'Coda' });
+
+    const html = desktopShellBoot(state);
+    expect(html).toContain('♩ = 144');
+    expect(html).toContain('Bb7');
+    expect(html).toContain('Coda');
+    expect(html).toContain('𝄆');
+    expect(html).toContain('𝄇');
+    expect(html).toContain('aria-label="Fb4"');
+  });
+
   it('adds measures and moves caret to the new measure for continued entry', () => {
     let state = createDesktopShell({ title: 'Measures' });
     state = addMeasure(state);

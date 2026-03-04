@@ -460,7 +460,23 @@ const eventToStaffNote = (event: VoiceEvent): string | undefined => {
   if (event.type !== 'note') {
     return undefined;
   }
-  return `${event.pitch.step}${event.pitch.octave}`;
+
+  const accidental = (() => {
+    switch (event.pitch.accidental) {
+      case -2:
+        return 'bb';
+      case -1:
+        return 'b';
+      case 1:
+        return '#';
+      case 2:
+        return '##';
+      default:
+        return '';
+    }
+  })();
+
+  return `${event.pitch.step}${accidental}${event.pitch.octave}`;
 };
 
 export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()): string => {
@@ -487,10 +503,20 @@ export const desktopShellBoot = (state: DesktopShellState = createDesktopShell()
         staff?.measures.map((item) => {
           const previewVoice = item.voices.find((candidate) => candidate.id === state.caret.selection.voiceId) ?? item.voices[0];
           const notes = (previewVoice?.events.map(eventToStaffNote).filter((note): note is string => note !== undefined) ?? []).slice(0, 8);
+          const latestNote = [...(previewVoice?.events ?? [])].reverse().find((event) => event.type === 'note');
           return {
             number: item.number,
             notes,
             isSelected: item.id === state.caret.selection.measureId,
+            ...(item.tempoBpm !== undefined ? { tempoBpm: item.tempoBpm } : {}),
+            repeatStart: item.repeatStart ?? false,
+            repeatEnd: item.repeatEnd ?? false,
+            ...(item.chordSymbols[0] !== undefined ? { chordSymbol: item.chordSymbols[0] } : {}),
+            ...(item.navigationMarker ? { navigationMarker: item.navigationMarker } : {}),
+            ...(latestNote && latestNote.type === 'note' && latestNote.dynamics ? { dynamics: latestNote.dynamics } : {}),
+            ...(latestNote && latestNote.type === 'note'
+              ? { articulation: (latestNote.articulations[0] ?? 'none') as 'none' | 'accent' | 'staccato' | 'tenuto' }
+              : {}),
           };
         }) ?? [],
     },

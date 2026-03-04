@@ -29,6 +29,13 @@ export interface DesktopShellUiModel {
       number: number;
       notes: string[];
       isSelected: boolean;
+      tempoBpm?: number;
+      repeatStart?: boolean;
+      repeatEnd?: boolean;
+      chordSymbol?: string;
+      navigationMarker?: 'DC' | 'DS' | 'Fine' | 'Coda';
+      dynamics?: 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff';
+      articulation?: 'none' | 'accent' | 'staccato' | 'tenuto';
     }>;
   };
   engraving: {
@@ -96,17 +103,113 @@ const renderNotifications = (notifications: UiNotification[]): string => {
 
 const STEP_OFFSETS: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G', number> = { C: 6, D: 5, E: 4, F: 3, G: 2, A: 1, B: 0 };
 
-const noteToY = (note: string): number => {
-  const match = /^([A-G])([0-9])$/.exec(note);
+type ParsedNote = {
+  step: keyof typeof STEP_OFFSETS;
+  accidental: 'bb' | 'b' | '#' | '##' | '';
+  octave: number;
+};
+
+const parseNote = (note: string): ParsedNote | undefined => {
+  const match = /^([A-G])(bb|b|##|#)?([0-9])$/.exec(note);
   if (!match) {
+    return undefined;
+  }
+  const [, stepRaw, accidentalRaw, octaveRaw] = match;
+  return {
+    step: stepRaw as keyof typeof STEP_OFFSETS,
+    accidental: (accidentalRaw ?? '') as ParsedNote['accidental'],
+    octave: Number(octaveRaw),
+  };
+};
+
+const noteToY = (note: string): number => {
+  const parsed = parseNote(note);
+  if (!parsed) {
     return 74;
   }
-  const [, stepRaw, octaveRaw] = match;
-  const step = stepRaw as keyof typeof STEP_OFFSETS;
-  const octave = Number(octaveRaw);
-  const diatonic = octave * 7 + STEP_OFFSETS[step];
+  const diatonic = parsed.octave * 7 + STEP_OFFSETS[parsed.step];
   const e4 = 4 * 7 + STEP_OFFSETS.E;
   return 74 - (diatonic - e4) * 6;
+};
+
+const accidentalGlyph = (accidental: ParsedNote['accidental']): string => {
+  switch (accidental) {
+    case 'bb':
+      return '♭♭';
+    case 'b':
+      return '♭';
+    case '#':
+      return '♯';
+    case '##':
+      return '♯♯';
+    default:
+      return '';
+  }
+};
+
+const articulationGlyph = (articulation: NonNullable<DesktopShellUiModel['engraving']['articulation'] | DesktopShellUiModel['scorePreview']['measures'][number]['articulation']>): string => {
+  switch (articulation) {
+    case 'accent':
+      return '>'; 
+    case 'staccato':
+      return '•';
+    case 'tenuto':
+      return '—';
+    default:
+      return '';
+  }
+};
+
+const renderLedgerLines = (x: number, y: number): string => {
+  const lines: string[] = [];
+  for (const lineY of [26, 32, 38, 44, 50, 56, 62, 68, 74, 80, 86, 92, 98, 104, 110]) {
+    const above = y < 50 && lineY <= 50 && lineY >= y - 8;
+    const below = y > 98 && lineY >= 98 && lineY <= y + 8;
+    if (above || below) {
+      lines.push(`<line class="ledger" x1="${x - 10}" y1="${lineY}" x2="${x + 10}" y2="${lineY}" />`);
+    }
+  }
+  return lines.join('');
+};
+
+const renderSingleNote = (note: string, x: number): string => {
+  const parsed = parseNote(note);
+  const y = noteToY(note);
+  const accidental = parsed ? accidentalGlyph(parsed.accidental) : '';
+  const accidentalMarkup = accidental ? `<text class="accidental" x="${x - 18}" y="${y + 4}">${accidental}</text>` : '';
+  const stemDirection = y < 74 ? 'down' : 'up';
+  const stem =
+    stemDirection === 'up'
+      ? `<line class="stem" x1="${x + 8}" y1="${y}" x2="${x + 8}" y2="${y - 30}" />`
+      : `<line class="stem" x1="${x - 8}" y1="${y}" x2="${x - 8}" y2="${y + 30}" />`;
+
+  return `<g class="staff-note" aria-label="${escapeHtml(note)}">${renderLedgerLines(x, y)}${accidentalMarkup}<ellipse class="note-head" cx="${x}" cy="${y}" rx="8" ry="6" />${stem}</g>`;
+};
+
+const renderMeasureSymbols = (measure: DesktopShellUiModel['scorePreview']['measures'][number], xBase: number, yTop: number): string => {
+  const symbols: string[] = [];
+  if (measure.repeatStart) {
+    symbols.push(`<text class="repeat-marker repeat-start" x="${xBase + 8}" y="${yTop + 16}">𝄆</text>`);
+  }
+  if (measure.repeatEnd) {
+    symbols.push(`<text class="repeat-marker repeat-end" x="${xBase + 202}" y="${yTop + 16}">𝄇</text>`);
+  }
+  if (measure.tempoBpm) {
+    symbols.push(`<text class="tempo-mark" x="${xBase + 32}" y="${yTop + 16}">♩ = ${measure.tempoBpm}</text>`);
+  }
+  if (measure.chordSymbol) {
+    symbols.push(`<text class="chord-symbol" x="${xBase + 32}" y="${yTop + 30}">${escapeHtml(measure.chordSymbol)}</text>`);
+  }
+  if (measure.navigationMarker) {
+    symbols.push(`<text class="nav-marker" x="${xBase + 160}" y="${yTop + 30}">${escapeHtml(measure.navigationMarker)}</text>`);
+  }
+  if (measure.dynamics) {
+    symbols.push(`<text class="dynamics" x="${xBase + 32}" y="${yTop + 120}">${escapeHtml(measure.dynamics)}</text>`);
+  }
+  if (measure.articulation && measure.articulation !== 'none') {
+    symbols.push(`<text class="articulation" x="${xBase + 180}" y="${yTop + 120}">${articulationGlyph(measure.articulation)}</text>`);
+  }
+  return symbols.join('');
 };
 
 const renderMeasure = (
@@ -116,17 +219,17 @@ const renderMeasure = (
   const width = 228;
   const xBase = 24 + (index % 4) * width;
   const localIndex = index % 4;
-  const safeNotes = measure.notes.map((note) => escapeHtml(note));
-  const notesMarkup = safeNotes
-    .slice(0, 4)
+  const noteCount = Math.max(1, Math.min(8, measure.notes.length));
+  const noteSpacing = 150 / noteCount;
+  const notesMarkup = measure.notes
+    .slice(0, 8)
     .map((note, noteIndex) => {
-      const x = xBase + 64 + noteIndex * 34;
-      const y = noteToY(note);
-      return `<g class="staff-note" aria-label="${note}"><ellipse cx="${x}" cy="${y}" rx="8" ry="6" /><line x1="${x + 8}" y1="${y}" x2="${x + 8}" y2="${y - 28}" /></g>`;
+      const x = xBase + 58 + noteIndex * noteSpacing;
+      return renderSingleNote(note, x);
     })
     .join('');
 
-  return `<g class="measure${measure.isSelected ? ' selected' : ''}" data-measure="${measure.number}"><rect x="${xBase}" y="32" width="${width - 10}" height="84" rx="10" class="measure-bg" /><line x1="${xBase}" y1="50" x2="${xBase + width - 10}" y2="50" /><line x1="${xBase}" y1="62" x2="${xBase + width - 10}" y2="62" /><line x1="${xBase}" y1="74" x2="${xBase + width - 10}" y2="74" /><line x1="${xBase}" y1="86" x2="${xBase + width - 10}" y2="86" /><line x1="${xBase}" y1="98" x2="${xBase + width - 10}" y2="98" />${localIndex === 0 ? '<text x="32" y="84" class="clef">𝄞</text>' : ''}<text x="${xBase + 12}" y="45" class="measure-label">M${measure.number}</text>${notesMarkup || `<text x="${xBase + 64}" y="74" class="placeholder-note">Rest</text>`}</g>`;
+  return `<g class="measure${measure.isSelected ? ' selected' : ''}" data-measure="${measure.number}"><rect x="${xBase}" y="32" width="${width - 10}" height="96" rx="10" class="measure-bg" /><line x1="${xBase}" y1="56" x2="${xBase + width - 10}" y2="56" /><line x1="${xBase}" y1="68" x2="${xBase + width - 10}" y2="68" /><line x1="${xBase}" y1="80" x2="${xBase + width - 10}" y2="80" /><line x1="${xBase}" y1="92" x2="${xBase + width - 10}" y2="92" /><line x1="${xBase}" y1="104" x2="${xBase + width - 10}" y2="104" />${localIndex === 0 ? '<text x="32" y="90" class="clef">𝄞</text>' : ''}<text x="${xBase + 12}" y="50" class="measure-label">M${measure.number}</text>${renderMeasureSymbols(measure, xBase, 32)}${notesMarkup || `<text x="${xBase + 64}" y="82" class="placeholder-note">Rest</text>`}</g>`;
 };
 
 const renderScorePreview = (preview: DesktopShellUiModel['scorePreview']): string => {
@@ -140,7 +243,7 @@ const renderScorePreview = (preview: DesktopShellUiModel['scorePreview']): strin
     const end = start + 4;
     const measures = preview.measures.slice(start, end);
     const systemMarkup = measures.map((measure, measureOffset) => renderMeasure(measure, measureOffset)).join('');
-    return `<svg viewBox="0 0 940 140" class="staff-preview" role="img" aria-label="System ${systemIndex + 1} showing measures ${measures[0]!.number}-${measures.at(-1)!.number}"><g class="staff-lines">${systemMarkup}</g></svg>`;
+    return `<svg viewBox="0 0 940 170" class="staff-preview" role="img" aria-label="System ${systemIndex + 1} showing measures ${measures[0]!.number}-${measures.at(-1)!.number}"><g class="staff-lines">${systemMarkup}</g></svg>`;
   });
 
   return `<section><h2>Sheet music preview</h2><p class="subhead">${safeClef} clef · ${preview.measures.length} measure${preview.measures.length === 1 ? '' : 's'}</p><div class="score-preview-grid">${systems.join('')}</div></section>`;
@@ -233,12 +336,20 @@ export const renderDesktopShellHtml = (model: DesktopShellUiModel): string => {
       .notification.success { background: rgb(52 211 153 / 16%); border-color: rgb(167 243 208 / 40%); }
       .notification.error { background: rgb(251 113 133 / 16%); border-color: rgb(251 113 133 / 35%); }
       .score-preview-grid { display: grid; gap: 0.8rem; margin-top: 0.85rem; }
-      .staff-preview { width: 100%; border-radius: 12px; border: 1px solid #374167; background: #171d35; }
+      .staff-preview { width: 100%; border-radius: 12px; border: 1px solid #374167; background: linear-gradient(180deg, #171d35 0%, #11172a 100%); }
       .staff-lines line, .staff-note line { stroke: #9ea8d6; stroke-width: 1.6; }
+      .ledger { stroke: #c6cff7; stroke-width: 1.2; }
+      .note-head { fill: #f6f7ff; stroke: #f6f7ff; }
+      .stem { stroke: #f6f7ff; stroke-width: 1.4; }
+      .accidental { fill: #f2f5ff; font-size: 15px; font-weight: 700; }
       .measure-bg { fill: rgb(15 20 35 / 50%); stroke: #35406a; stroke-width: 1; }
       .measure.selected .measure-bg { stroke: var(--accent); stroke-width: 2; }
       .staff-note ellipse { fill: #f6f7ff; }
       .clef { font-size: 45px; fill: #d9def8; }
+      .tempo-mark, .chord-symbol, .nav-marker { fill: #d5ddfb; font-size: 10px; font-weight: 600; }
+      .dynamics { fill: #ffd99b; font-size: 14px; font-weight: 700; font-style: italic; }
+      .articulation { fill: #ffe6b7; font-size: 16px; font-weight: 700; }
+      .repeat-marker { fill: #cbd4fb; font-size: 20px; font-weight: 700; }
       .measure-label { fill: var(--muted); font-size: 11px; }
       .placeholder-note { fill: var(--muted); }
       .empty-state { margin: 0.9rem 0 0; color: var(--muted); font-style: italic; }

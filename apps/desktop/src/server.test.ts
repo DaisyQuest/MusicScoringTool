@@ -94,6 +94,13 @@ describe('desktop server', () => {
 
     const engravedHtml = await (await fetch(baseUrl)).text();
     expect(engravedHtml).toContain('136 bpm');
+    const textSymbolResponse = await fetch(`${baseUrl}/api/text-symbols`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chordSymbol: 'G7', navigationMarker: 'DC' }),
+    });
+    expect(textSymbolResponse.status).toBe(200);
+
 
     const addMeasureResponse = await fetch(`${baseUrl}/api/measures`, {
       method: 'POST',
@@ -118,10 +125,24 @@ describe('desktop server', () => {
     expect(html).toContain('Events in focus voice');
     expect(html).toContain('>2<');
     expect(html).toContain('data-measure="2"');
+    expect(html).toContain('♩ = 136');
+    expect(html).toContain('G7');
+    expect(html).toContain('DC');
+    expect(html).toContain('𝄆');
+    expect(html).toContain('𝄇');
+    expect(html).toContain('ff');
+    expect(html).toContain('>');
     expect(html).toContain('Unsaved changes');
     expect(html).toContain('Sheet music preview');
     expect(html).toContain('data-measure="1"');
     expect(html).toContain('data-measure="2"');
+    expect(html).toContain('♩ = 136');
+    expect(html).toContain('G7');
+    expect(html).toContain('DC');
+    expect(html).toContain('𝄆');
+    expect(html).toContain('𝄇');
+    expect(html).toContain('ff');
+    expect(html).toContain('>');
   });
 
 
