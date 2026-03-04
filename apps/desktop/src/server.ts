@@ -81,6 +81,29 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
   const undoStack: DesktopShellState[] = [];
   const redoStack: DesktopShellState[] = [];
 
+  const resetCaretToLoadedScore = (state: DesktopShellState): DesktopShellState => {
+    const part = state.score.parts[0];
+    const staff = part?.staves[0];
+    const measure = staff?.measures[0];
+    const voice = measure?.voices[0];
+    if (!part || !staff || !measure || !voice) {
+      throw new Error('Loaded score is missing default voice structure.');
+    }
+
+    return {
+      ...state,
+      caret: {
+        selection: {
+          partId: part.id,
+          staffId: staff.id,
+          measureId: measure.id,
+          voiceId: voice.id,
+        },
+        eventIndex: voice.events.length,
+      },
+    };
+  };
+
   const commitMutation = (mutate: (state: DesktopShellState) => DesktopShellState): void => {
     undoStack.push(structuredClone(shellState));
     if (undoStack.length > 100) {
@@ -292,9 +315,10 @@ export const createDesktopServer = (port = resolveDesktopPort(process.env.PORT))
           const loadedScore = deserializeScore(raw);
           const nextShell = createDesktopShell({ title: loadedScore.title });
           nextShell.score = loadedScore;
-          nextShell.project.path = loadPath;
-          nextShell.project.dirty = false;
-          return nextShell;
+          const nextWithLoadedCaret = resetCaretToLoadedScore(nextShell);
+          nextWithLoadedCaret.project.path = loadPath;
+          nextWithLoadedCaret.project.dirty = false;
+          return nextWithLoadedCaret;
         });
 
         sendJson(response, 200, { ok: true, title: shellState.score.title });

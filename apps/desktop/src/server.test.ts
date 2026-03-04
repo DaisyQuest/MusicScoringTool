@@ -292,9 +292,16 @@ describe('desktop server', () => {
       });
       expect(loadResponse.status).toBe(200);
 
+      const postLoadInsertResponse = await fetch(`${baseUrl}/api/notes`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pitch: { step: 'D', octave: 4 }, duration: 'quarter', dots: 0 }),
+      });
+      expect(postLoadInsertResponse.status).toBe(200);
+
       const state = await (await fetch(`${baseUrl}/api/state`)).json() as { project: { path?: string }; eventCount: number };
       expect(state.project.path).toBe(projectPath);
-      expect(state.eventCount).toBe(1);
+      expect(state.eventCount).toBe(2);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
